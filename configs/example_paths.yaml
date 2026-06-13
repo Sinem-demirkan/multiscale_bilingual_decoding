@@ -1,0 +1,11 @@
+data_root: /path/to/ds005455_data
+output_root: /path/to/outputs
+
+# Example subject subset for quick testing
+subjects:
+  - sub-001
+  - sub-002
+
+# Local extent settings
+local_accuracy_threshold: 0.60
+local_z_threshold: 1.64
