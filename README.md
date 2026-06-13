@@ -1,6 +1,6 @@
 # Multiscale Bilingual Decoding
 
-This repository contains the core code used to compute the two participant-level measures from our bilingual fMRI decoding study:
+This repository contains the code used to compute the two participant-level measures from our bilingual fMRI decoding study:
 
 - `cortical extent`: local parcelwise language decoding summarized as the proportion of parcels carrying reliable language information
 - `cortical strength`: whole-cortex language decoding summarized as cross-run balanced accuracy
@@ -18,6 +18,14 @@ DATA_ROOT/
     sub-001_task-LanguageControl_run-02_events.tsv
     ...
 ```
+## Dataset citation
+
+The analyses in this repository use the public dataset described in:
+
+Guo, T., Liu, X., Chen, M., Fu, Y., & Guo, T. (2025). An fMRI dataset for investigating language control and cognitive control in bilinguals. *Scientific Data, 12*(1).
+https://doi.org/10.1038/s41597-025-05245-9
+
+Data repository: OpenNeuro ds005455, https://doi.org/10.18112/openneuro.ds005455.v1.1.5
 
 ## What the scripts do
 
@@ -46,7 +54,7 @@ DATA_ROOT/
 
 Create an environment with the dependencies in `requirements.txt`.
 
-## Included files
+## Files
 
 ```text
 multiscale_bilingual_decoding/
@@ -61,39 +69,6 @@ multiscale_bilingual_decoding/
     compute_local_extent.py
     compute_global_strength.py
 ```
-
-## Example commands
-
-Run the local measure:
-
-```bash
-python src/compute_local_extent.py \
-  --data-root /path/to/ds005455_data \
-  --out-dir outputs/local
-```
-
-Run the global measure:
-
-```bash
-python src/compute_global_strength.py \
-  --data-root /path/to/ds005455_data \
-  --out-dir outputs/global
-```
-
-Run a small subset of subjects:
-
-```bash
-python src/compute_local_extent.py \
-  --data-root /path/to/ds005455_data \
-  --out-dir outputs/local \
-  --subjects sub-001 sub-002
-```
-
-## Suggested repository usage
-
-- keep raw data outside this repository
-- save generated outputs under a separate `outputs/` directory
-- version only the code, documentation, and lightweight configs
 
 ## Main outputs
 
@@ -115,4 +90,4 @@ python src/compute_local_extent.py \
 
 - Language labels are derived from `trial_type`: entries beginning with `L1` are labeled `L1`, and entries beginning with `L2` are labeled `L2`.
 - Cross-run evaluation means one run is used for training and the other for testing, then the folds are averaged.
-- The local `z > 1.64` extent measure uses a one-sided binomial p-value derived from the observed parcelwise decoding score, matching the analysis release.
+- The local `z > 1.64` extent measure uses a one-sided binomial p-value derived from the observed parcelwise decoding score.
