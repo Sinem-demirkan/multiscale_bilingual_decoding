@@ -13,7 +13,7 @@ from sklearn.preprocessing import StandardScaler
 DATA_ROOT = Path("/home/sdemirka/fmri/duo-cogcon")
 TASK = "LanguageControl"
 START_SUB = 1
-END_SUB = 2
+END_SUB = 77 # you may change this
 
 TARGET = "language"   # or "switch"
 TRIAL_COLUMN = "trial_type"
