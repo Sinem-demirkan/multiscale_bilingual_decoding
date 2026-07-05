@@ -1,120 +1,148 @@
-from __future__ import annotations
-
-import argparse
 from pathlib import Path
 
+import nibabel as nib
 import numpy as np
 import pandas as pd
-from scipy import stats
+from nilearn.maskers import NiftiMasker
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import LeaveOneGroupOut, cross_val_score
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
-from common import (
-    balanced_accuracy_from_predictions,
-    collect_subject_runs,
-    l1_l2_sensitivity,
-    load_subject_trials,
-    load_template_and_atlas,
-    make_estimator,
-    cv_predictions,
+
+DATA_ROOT = Path("/path/to/duo-cogcon")
+TASK = "LanguageControl"
+START_SUB = 1
+END_SUB = 77
+
+# Choose target:
+# "language" -> L1 vs L2
+# "switch"   -> S vs NS
+TARGET = "language"
+
+TRIAL_COLUMN = "trial_type"   # change if needed
+
+
+def subject_id(n):
+return f"sub-{n:03d}"
+
+
+def relabel_trials(trial_labels, target):
+trial_labels = pd.Series(trial_labels).astype(str)
+
+if target == "language":
+  mapping = {
+      "L1S": "L1",
+      "L1NS": "L1",
+      "L2S": "L2",
+      "L2NS": "L2",
+  }
+elif target == "switch":
+  mapping = {
+      "L1S": "S",
+      "L2S": "S",
+      "L1NS": "NS",
+      "L2NS": "NS",
+  }
+else:
+  raise ValueError("TARGET must be 'language' or 'switch'")
+
+y = trial_labels.map(mapping)
+keep = y.notna().to_numpy()
+return y, keep
+
+
+rows = []
+
+for sub in range(START_SUB, END_SUB + 1):
+subject = subject_id(sub)
+
+beta_files = sorted(
+  (DATA_ROOT / "derivatives" / "singletrial").glob(
+      f"{subject}_task-{TASK}_run-*_singletrial-Act.nii.gz"
+  )
+)
+event_files = sorted(
+  (DATA_ROOT / "events").glob(
+      f"{subject}_task-{TASK}_run-*_events.tsv"
+  )
 )
 
+if len(beta_files) == 0 or len(event_files) == 0:
+  print(subject, "missing files")
+  continue
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Compute whole-cortex decoding strength.")
-    parser.add_argument("--data-root", type=Path, required=True)
-    parser.add_argument("--out-dir", type=Path, required=True)
-    parser.add_argument("--subjects", nargs="*", default=None)
-    return parser.parse_args()
+imgs = []
+labels = []
+groups = []
 
+for beta_file, event_file in zip(beta_files, event_files):
+  run = int(beta_file.name.split("run-")[1].split("_")[0])
 
-def compute_parcel_means(X_voxels: np.ndarray, atlas_data: np.ndarray, n_rois: int = 800):
-    X_parcels = np.zeros((X_voxels.shape[0], n_rois), dtype=np.float32)
-    for parcel in range(1, n_rois + 1):
-        vox = np.flatnonzero(atlas_data == parcel)
-        if len(vox) == 0:
-            continue
-        X_parcels[:, parcel - 1] = X_voxels[:, vox].mean(axis=1)
-    return X_parcels
+  events = pd.read_csv(event_file, sep="\t")
+  img = nib.load(beta_file)
 
+  if TRIAL_COLUMN not in events.columns:
+      print(subject, f"missing column {TRIAL_COLUMN} in {event_file.name}")
+      continue
 
-def main():
-    args = parse_args()
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+  if img.shape[-1] != len(events):
+      print(subject, f"run {run} mismatch")
+      continue
 
-    template, _, atlas_data = load_template_and_atlas(n_rois=800, resolution_mm=2)
-    subjects = collect_subject_runs(args.data_root)
-    chosen_subjects = sorted(subjects)
-    if args.subjects:
-        requested = set(args.subjects)
-        chosen_subjects = [s for s in chosen_subjects if s in requested]
+  y_full, keep = relabel_trials(events[TRIAL_COLUMN], TARGET)
+  keep_idx = np.where(keep)[0]
 
-    estimator = make_estimator(C=0.01)
+  imgs.extend(nib.four_to_three(img.slicer[..., keep_idx]))
+  labels.extend(y_full.iloc[keep_idx].tolist())
+  groups.extend([run] * len(keep_idx))
 
-    rows = []
-    fold_rows = []
-    skipped = []
+if len(imgs) == 0:
+  print(subject, "no usable trials")
+  continue
 
-    for subject in chosen_subjects:
-        try:
-            X_voxels, y, groups = load_subject_trials(args.data_root, subject, subjects[subject], template)
-            X_parcels = compute_parcel_means(X_voxels, atlas_data, n_rois=800)
-            y_true, y_pred, folds = cv_predictions(X_parcels, y, groups, estimator)
-            bal_acc = balanced_accuracy_from_predictions(y_true, y_pred)
-            l1_sens, l2_sens = l1_l2_sensitivity(y_true, y_pred)
+y = np.array(labels)
+if len(np.unique(y)) < 2:
+  print(subject, "only one class left after relabeling")
+  continue
 
-            rows.append(
-                {
-                    "subject": subject,
-                    "balanced_accuracy": bal_acc,
-                    "accuracy_minus_chance": bal_acc - 0.5,
-                    "l1_sensitivity": l1_sens,
-                    "l2_sensitivity": l2_sens,
-                    "n_trials": int(len(y)),
-                    "n_L1": int(np.sum(y == "L1")),
-                    "n_L2": int(np.sum(y == "L2")),
-                    "n_features": X_parcels.shape[1],
-                }
-            )
-            for fold in folds:
-                fold_rows.append({"subject": subject, **fold})
-            print(f"Finished {subject}: strength={bal_acc:.4f}", flush=True)
-        except Exception as exc:
-            skipped.append({"subject": subject, "error": str(exc)})
-            print(f"Skipped {subject}: {exc}", flush=True)
+masker = NiftiMasker(mask_strategy="background", standardize=False)
+X = masker.fit_transform(imgs)
+groups = np.array(groups)
 
-    results = pd.DataFrame(rows).sort_values("subject")
-    folds = pd.DataFrame(fold_rows).sort_values(["subject", "fold"])
-    skipped_df = pd.DataFrame(skipped)
+clf = make_pipeline(
+  StandardScaler(),
+  LogisticRegression(max_iter=5000, solver="liblinear"),
+)
 
-    results.to_csv(args.out_dir / "whole_cortex_strength_by_subject.csv", index=False)
-    folds.to_csv(args.out_dir / "whole_cortex_strength_folds.csv", index=False)
-    skipped_df.to_csv(args.out_dir / "skipped_subjects.csv", index=False)
+cv = LeaveOneGroupOut()
+scores = cross_val_score(
+  clf,
+  X,
+  y,
+  cv=cv,
+  groups=groups,
+  scoring="balanced_accuracy",
+)
 
-    if len(results):
-        t, p = stats.ttest_1samp(results["accuracy_minus_chance"], 0.0)
-        ci = stats.t.interval(
-            0.95,
-            len(results) - 1,
-            loc=results["balanced_accuracy"].mean(),
-            scale=stats.sem(results["balanced_accuracy"]),
-        )
-        summary = pd.DataFrame(
-            [
-                {
-                    "n_subjects": len(results),
-                    "mean_balanced_accuracy": results["balanced_accuracy"].mean(),
-                    "median_balanced_accuracy": results["balanced_accuracy"].median(),
-                    "sd_balanced_accuracy": results["balanced_accuracy"].std(ddof=1),
-                    "min_balanced_accuracy": results["balanced_accuracy"].min(),
-                    "max_balanced_accuracy": results["balanced_accuracy"].max(),
-                    "ci_low_balanced_accuracy": ci[0],
-                    "ci_high_balanced_accuracy": ci[1],
-                    "t_vs_chance": t,
-                    "p_vs_chance": p,
-                }
-            ]
-        )
-        summary.to_csv(args.out_dir / "whole_cortex_strength_summary.csv", index=False)
+mean_score = scores.mean()
+rows.append(
+  {
+      "subject": subject,
+      "target": TARGET,
+      "balanced_accuracy": mean_score,
+      "n_trials": len(y),
+      "classes": ",".join(sorted(np.unique(y))),
+  }
+)
+print(subject, round(mean_score, 4))
 
+results = pd.DataFrame(rows)
 
-if __name__ == "__main__":
-    main()
+if TARGET == "language":
+out_csv = "self_whole_cortex_language_results.csv"
+else:
+out_csv = "self_whole_cortex_switch_results.csv"
+
+results.to_csv(out_csv, index=False)
+print(results)
