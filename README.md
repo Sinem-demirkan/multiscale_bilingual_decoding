@@ -6,7 +6,7 @@ This repository contains the code used to compute the two participant-level meas
 
 This code uses the single-trial beta images and event files from the publicly available **Guo et al. Chinese–English bilingual picture-naming dataset**:
 
-> Guo, T., Liu, X., Chen, M., Fu, Y., & Guo, T. (2025). *An fMRI dataset for investigating language control and cognitive control in bilinguals*. *Scientific Data, 12*(1). https://doi.org/10.1038/s41597-025-05245-9
+> Guo, T., Liu, X., Chen, M., Fu, Y., & Guo, T. (2025). *An fMRI dataset for investigating language control and cognitive control in bilinguals*. *Scientific Data, 12*(1). 
 
 The dataset is available from **OpenNeuro**:
 
