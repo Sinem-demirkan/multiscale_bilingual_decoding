@@ -1,135 +1,205 @@
-from __future__ import annotations
+"""
+Within-subject parcelwise Schaefer-800 decoding for the Guo et al. bilingual
+picture-naming dataset (OpenNeuro ds005455).
 
-import argparse
+This script reproduces the local Schaefer-800 multivoxel analysis. For each
+subject, single-trial beta images are resampled to MNI space, and decoding is
+run separately within each Schaefer parcel using leave-one-run-out
+cross-validation.
+
+The output is:
+- schaefer800_parcelwise_multivoxel_by_subject_and_parcel.csv
+
+This file can then be used to compute subject-level local extent measures.
+"""
+
 from pathlib import Path
 
+import nibabel as nib
 import numpy as np
 import pandas as pd
-from scipy.stats import binom, norm
+from nilearn import datasets, image
+from sklearn.base import clone
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import balanced_accuracy_score
+from sklearn.model_selection import LeaveOneGroupOut
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
 
-from common import (
-    balanced_accuracy_from_predictions,
-    collect_subject_runs,
-    cv_predictions,
-    load_subject_trials,
-    load_template_and_atlas,
-    make_estimator,
+
+DATA_ROOT = Path("/home/sdemirka/fmri/duo-cogcon")
+TASK = "LanguageControl"
+START_SUB = 1
+END_SUB = 77
+TRIAL_COLUMN = "trial_type"
+
+N_ROIS = 800
+YEO_NETWORKS = 7
+RESOLUTION_MM = 2
+RANDOM_STATE = 42
+
+OUT_CSV = "schaefer800_parcelwise_multivoxel_by_subject_and_parcel.csv"
+SKIPPED_CSV = "schaefer800_parcelwise_multivoxel_skipped_subjects.csv"
+
+
+def subject_id(n):
+  return f"sub-{n:03d}"
+
+
+def parse_run_number(path):
+  return int(path.name.split("run-")[1].split("_")[0])
+
+
+def language_label(trial_type):
+  trial_type = str(trial_type)
+  if trial_type.startswith("L1"):
+      return "L1"
+  if trial_type.startswith("L2"):
+      return "L2"
+  return np.nan
+
+
+def cv_balanced_accuracy(X, y, run_groups, estimator):
+  cv = LeaveOneGroupOut()
+  scores = []
+
+  for train_idx, test_idx in cv.split(X, y, groups=run_groups):
+      clf = clone(estimator)
+      clf.fit(X[train_idx], y[train_idx])
+      yhat = clf.predict(X[test_idx])
+      scores.append(balanced_accuracy_score(y[test_idx], yhat))
+
+  return float(np.mean(scores))
+
+
+def load_subject_data(subject):
+  beta_files = sorted(
+      DATA_ROOT.glob(f"**/{subject}_task-{TASK}_run-*_singletrial-Act.nii.gz")
+  )
+  event_files = sorted(
+      DATA_ROOT.glob(f"**/{subject}_task-{TASK}_run-*_events.tsv")
+  )
+
+  if len(beta_files) == 0 or len(event_files) == 0:
+      return None, None, None
+
+  beta_by_run = {parse_run_number(p): p for p in beta_files}
+  event_by_run = {parse_run_number(p): p for p in event_files}
+  runs = sorted(set(beta_by_run) & set(event_by_run))
+
+  template = datasets.load_mni152_template(resolution=RESOLUTION_MM)
+
+  run_arrays = []
+  run_labels = []
+  run_groups = []
+
+  for run in runs:
+      beta_file = beta_by_run[run]
+      event_file = event_by_run[run]
+
+      img = image.resample_to_img(
+          nib.load(beta_file),
+          template,
+          interpolation="continuous",
+          force_resample=True,
+          copy_header=True,
+      )
+      events = pd.read_csv(event_file, sep="\t")
+
+      if TRIAL_COLUMN not in events.columns:
+          print(subject, f"missing column {TRIAL_COLUMN} in {event_file.name}")
+          continue
+
+      events["language"] = events[TRIAL_COLUMN].map(language_label)
+      events = events.dropna(subset=["language"]).reset_index(drop=True)
+
+      if len(events) != img.shape[-1]:
+          print(subject, f"run {run} mismatch")
+          continue
+
+      data = np.asarray(img.dataobj, dtype=np.float32)
+      run_arrays.append(data.reshape(-1, data.shape[-1]).T)
+      run_labels.append(events["language"].to_numpy())
+      run_groups.append(np.repeat(run, len(events)))
+
+  if len(run_arrays) < 2:
+      return None, None, None
+
+  X = np.vstack(run_arrays)
+  y = np.concatenate(run_labels)
+  groups = np.concatenate(run_groups)
+
+  if set(np.unique(y)) != {"L1", "L2"}:
+      return None, None, None
+
+  return X, y, groups
+
+
+template = datasets.load_mni152_template(resolution=RESOLUTION_MM)
+atlas = datasets.fetch_atlas_schaefer_2018(
+  n_rois=N_ROIS,
+  yeo_networks=YEO_NETWORKS,
+  resolution_mm=RESOLUTION_MM,
+)
+atlas_img = image.resample_to_img(
+  nib.load(atlas.maps),
+  template,
+  interpolation="nearest",
+  force_resample=True,
+  copy_header=True,
+)
+atlas_data = np.asarray(atlas_img.dataobj).astype(np.int16).ravel()
+
+clf = make_pipeline(
+  StandardScaler(),
+  LogisticRegression(
+      penalty="l2",
+      C=0.01,
+      solver="lbfgs",
+      max_iter=1000,
+      random_state=RANDOM_STATE,
+  ),
 )
 
+rows = []
+skipped = []
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Compute parcelwise local decoding extent.")
-    parser.add_argument("--data-root", type=Path, required=True)
-    parser.add_argument("--out-dir", type=Path, required=True)
-    parser.add_argument("--subjects", nargs="*", default=None)
-    parser.add_argument("--accuracy-threshold", type=float, default=0.60)
-    parser.add_argument("--z-threshold", type=float, default=1.64)
-    return parser.parse_args()
+for sub in range(START_SUB, END_SUB + 1):
+  subject = subject_id(sub)
+  X, y, groups = load_subject_data(subject)
 
+  if X is None:
+      skipped.append({"subject": subject, "reason": "missing_or_unusable_data"})
+      print(subject, "missing or unusable data")
+      continue
 
-def one_sided_binomial_p(accuracy: float, n_trials: int) -> tuple[int, float]:
-    n_correct = int(np.rint(accuracy * n_trials))
-    p = float(binom.sf(n_correct - 1, n_trials, 0.5))
-    return n_correct, p
+  print(
+      f"Running {subject}: {len(y)} trials, "
+      f"L1={np.sum(y == 'L1')}, L2={np.sum(y == 'L2')}"
+  )
 
+  for parcel in range(1, N_ROIS + 1):
+      vox = np.flatnonzero(atlas_data == parcel)
 
-def main():
-    args = parse_args()
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+      if len(vox) < 2:
+          acc = np.nan
+      else:
+          acc = cv_balanced_accuracy(X[:, vox], y, groups, clf)
 
-    template, _, atlas_data = load_template_and_atlas(n_rois=800, resolution_mm=2)
-    subjects = collect_subject_runs(args.data_root)
-    chosen_subjects = sorted(subjects)
-    if args.subjects:
-        requested = set(args.subjects)
-        chosen_subjects = [s for s in chosen_subjects if s in requested]
+      rows.append({
+          "subject": subject,
+          "parcel": parcel,
+          "accuracy": acc,
+          "accuracy_minus_chance": acc - 0.5 if np.isfinite(acc) else np.nan,
+          "n_voxels": int(len(vox)),
+          "n_trials": int(len(y)),
+          "n_L1": int(np.sum(y == "L1")),
+          "n_L2": int(np.sum(y == "L2")),
+      })
 
-    estimator = make_estimator(C=0.01)
+  pd.DataFrame(rows).to_csv(OUT_CSV, index=False)
 
-    parcel_rows = []
-    summary_rows = []
-    skipped = []
+pd.DataFrame(rows).to_csv(OUT_CSV, index=False)
+pd.DataFrame(skipped).to_csv(SKIPPED_CSV, index=False)
 
-    for subject in chosen_subjects:
-        try:
-            X_voxels, y, groups = load_subject_trials(args.data_root, subject, subjects[subject], template)
-            subject_rows = []
-            for parcel in range(1, 801):
-                vox = np.flatnonzero(atlas_data == parcel)
-                if len(vox) < 2:
-                    acc = np.nan
-                    n_correct = np.nan
-                    p_binom = np.nan
-                    z_one_sided = np.nan
-                else:
-                    y_true, y_pred, _ = cv_predictions(X_voxels[:, vox], y, groups, estimator)
-                    acc = balanced_accuracy_from_predictions(y_true, y_pred)
-                    n_correct, p_binom = one_sided_binomial_p(acc, len(y_true))
-                    z_one_sided = float(norm.isf(np.clip(p_binom, 1e-300, 1 - 1e-16)))
-
-                subject_rows.append(
-                    {
-                        "subject": subject,
-                        "parcel": parcel,
-                        "accuracy": acc,
-                        "accuracy_minus_chance": acc - 0.5 if np.isfinite(acc) else np.nan,
-                        "n_trials": int(len(y)),
-                        "n_correct_approx": n_correct,
-                        "p_binom_one_sided": p_binom,
-                        "z_one_sided": z_one_sided,
-                        "n_voxels": int(len(vox)),
-                    }
-                )
-
-            subject_df = pd.DataFrame(subject_rows)
-            subject_df["accuracy_gt_threshold"] = subject_df["accuracy"] > args.accuracy_threshold
-            subject_df["z_gt_threshold"] = subject_df["z_one_sided"] > args.z_threshold
-            parcel_rows.append(subject_df)
-
-            summary_rows.append(
-                {
-                    "subject": subject,
-                    "n_accuracy_gt_threshold": int(subject_df["accuracy_gt_threshold"].sum()),
-                    "prop_accuracy_gt_threshold": float(subject_df["accuracy_gt_threshold"].mean()),
-                    "n_z_gt_threshold": int(subject_df["z_gt_threshold"].sum()),
-                    "prop_z_gt_threshold": float(subject_df["z_gt_threshold"].mean()),
-                    "mean_accuracy": float(subject_df["accuracy"].mean()),
-                    "max_accuracy": float(subject_df["accuracy"].max()),
-                }
-            )
-            print(
-                f"Finished {subject}: extent(z>{args.z_threshold})="
-                f"{summary_rows[-1]['prop_z_gt_threshold']:.4f}",
-                flush=True,
-            )
-        except Exception as exc:
-            skipped.append({"subject": subject, "error": str(exc)})
-            print(f"Skipped {subject}: {exc}", flush=True)
-
-    long_df = pd.concat(parcel_rows, ignore_index=True) if parcel_rows else pd.DataFrame()
-    summary_df = pd.DataFrame(summary_rows).sort_values("subject") if summary_rows else pd.DataFrame()
-    skipped_df = pd.DataFrame(skipped)
-
-    long_df.to_csv(args.out_dir / "parcelwise_local_accuracy_long.csv", index=False)
-    summary_df.to_csv(args.out_dir / "local_extent_by_subject.csv", index=False)
-    skipped_df.to_csv(args.out_dir / "skipped_subjects.csv", index=False)
-
-    if len(summary_df):
-        overall = pd.DataFrame(
-            [
-                {
-                    "n_subjects": len(summary_df),
-                    "mean_prop_accuracy_gt_threshold": summary_df["prop_accuracy_gt_threshold"].mean(),
-                    "mean_prop_z_gt_threshold": summary_df["prop_z_gt_threshold"].mean(),
-                    "mean_accuracy": summary_df["mean_accuracy"].mean(),
-                    "mean_max_accuracy": summary_df["max_accuracy"].mean(),
-                    "accuracy_threshold": args.accuracy_threshold,
-                    "z_threshold": args.z_threshold,
-                }
-            ]
-        )
-        overall.to_csv(args.out_dir / "local_extent_summary.csv", index=False)
-
-
-if __name__ == "__main__":
-    main()
+print(f"Wrote {OUT_CSV}")
