@@ -133,13 +133,17 @@ fit on the training participants and evaluated on the held-out participant.
 
 ```bash
 Rscript src/age_of_acquisition_prediction \
+  --data-root /path/to/duo-cogcon \
   --transfer outputs/cross_subject_transfer/cross_subject_transfer_long.csv \
   --self-decoding outputs/whole_cortex/distributed_parcel_mean_decoding_by_subject.csv \
   --local-extent outputs/local_parcelwise/local_z_extent_by_subject.csv \
   --qc /path/to/languagecontrol_qc_by_subject.csv \
-  --metadata /path/to/subject_metadata.csv \
   --out-dir outputs/age_of_acquisition
 ```
+
+The script reads AoA from `participants.tsv` in the dataset root. If the AoA
+column has a nonstandard name, add `--aoa-column column_name`. You can also pass
+`--participants /path/to/participants.tsv` instead of `--data-root`.
 
 Outputs:
 

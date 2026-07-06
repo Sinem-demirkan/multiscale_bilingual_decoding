@@ -21,12 +21,52 @@ parse_args = function() {
     i = i + 2
   }
 
-  required = c("transfer", "self-decoding", "qc", "metadata", "out-dir")
+  required = c("transfer", "self-decoding", "qc", "out-dir")
   missing = setdiff(required, names(out))
   if (length(missing) > 0) {
     stop(paste("Missing required arguments:", paste(missing, collapse = ", ")))
   }
 
+  if (!("participants" %in% names(out)) && !("data-root" %in% names(out))) {
+    stop("Provide either --participants /path/to/participants.tsv or --data-root /path/to/duo-cogcon")
+  }
+
+  out
+}
+
+read_participants = function(args) {
+  if ("participants" %in% names(args)) {
+    path = args[["participants"]]
+  } else {
+    path = file.path(args[["data-root"]], "participants.tsv")
+  }
+
+  participants = read.delim(path, stringsAsFactors = FALSE)
+
+  if ("subject" %in% names(participants)) {
+    subject_col = "subject"
+  } else if ("participant_id" %in% names(participants)) {
+    subject_col = "participant_id"
+  } else {
+    stop("participants.tsv must contain either subject or participant_id")
+  }
+
+  if ("aoa-column" %in% names(args)) {
+    aoa_col = args[["aoa-column"]]
+    if (!(aoa_col %in% names(participants))) {
+      stop(paste("--aoa-column was not found in participants.tsv:", aoa_col))
+    }
+  } else {
+    candidates = c("AoA", "aoa", "age_of_acquisition", "AgeOfAcquisition", "age_acquisition")
+    found = candidates[candidates %in% names(participants)]
+    if (length(found) == 0) {
+      stop("Could not find an AoA column in participants.tsv. Pass --aoa-column with the correct column name.")
+    }
+    aoa_col = found[[1]]
+  }
+
+  out = participants[, c(subject_col, aoa_col)]
+  names(out) = c("subject", "AoA")
   out
 }
 
@@ -114,7 +154,7 @@ dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 transfer = read.csv(args[["transfer"]], stringsAsFactors = FALSE)
 self = read.csv(args[["self-decoding"]], stringsAsFactors = FALSE)
 qc = read.csv(args[["qc"]], stringsAsFactors = FALSE)
-metadata = read.csv(args[["metadata"]], stringsAsFactors = FALSE)
+participants = read_participants(args)
 
 self = self[, c("subject", "balanced_accuracy")]
 names(self)[names(self) == "balanced_accuracy"] = "selfacc"
@@ -122,9 +162,7 @@ names(self)[names(self) == "balanced_accuracy"] = "selfacc"
 qc = qc[, c("subject", "mean_tsnr")]
 names(qc)[names(qc) == "mean_tsnr"] = "tsnr"
 
-metadata = metadata[, c("subject", "AoA")]
-
-subject_df = merge(metadata, self, by = "subject")
+subject_df = merge(participants, self, by = "subject")
 subject_df = merge(subject_df, qc, by = "subject")
 
 if ("local-extent" %in% names(args)) {
