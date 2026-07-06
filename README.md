@@ -122,6 +122,32 @@ from transfer accuracy. The adjusted model additionally includes teacher and
 learner self-decoding accuracy, teacher and learner mean tSNR, and their
 side-specific interactions.
 
+### 5. Nested AoA prediction from transfer effects
+
+Age-of-acquisition prediction uses leave-one-subject-out nesting. For each held
+out participant, the mixed transfer model is fit only on transfer pairs among
+the remaining training participants. The held-out participant's teacher and
+learner effects are then estimated only from transfer pairs between that
+participant and the training participants. Finally, AoA prediction models are
+fit on the training participants and evaluated on the held-out participant.
+
+```bash
+Rscript src/age_of_acquisition_prediction \
+  --transfer outputs/cross_subject_transfer/cross_subject_transfer_long.csv \
+  --self-decoding outputs/whole_cortex/distributed_parcel_mean_decoding_by_subject.csv \
+  --local-extent outputs/local_parcelwise/local_z_extent_by_subject.csv \
+  --qc /path/to/languagecontrol_qc_by_subject.csv \
+  --metadata /path/to/subject_metadata.csv \
+  --out-dir outputs/age_of_acquisition
+```
+
+Outputs:
+
+- `outputs/age_of_acquisition/age_of_acquisition_nested_lme4_predictions_wide.csv`
+- `outputs/age_of_acquisition/age_of_acquisition_nested_lme4_predictions_long.csv`
+- `outputs/age_of_acquisition/age_of_acquisition_nested_lme4_summary.csv`
+- `outputs/age_of_acquisition/nested_transfer_effects_by_fold.csv`
+
 ### Optional scripts
 
 - `src/local_searchlight_multivoxel.py` runs the voxelwise searchlight version
@@ -132,10 +158,6 @@ side-specific interactions.
   grouped permutation feature-importance variants. It defaults to
   `DATA_ROOT = Path("duo-cogcon")` and writes to
   `outputs/whole_cortex_classifier_variants`.
-- `src/age_of_acquisition_prediction` is a legacy exploratory Python script for
-  AoA prediction. Do not treat it as the final lme4-based transfer prediction
-  analysis without replacing its transfer-effect estimation with a fully nested
-  mixed-model pipeline.
 
 ## Notes
 

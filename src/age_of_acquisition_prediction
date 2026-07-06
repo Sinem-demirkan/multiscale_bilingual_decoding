@@ -1,530 +1,306 @@
-"""
-Legacy exploratory AoA prediction script.
+#!/usr/bin/env Rscript
 
-This script is kept for transparency but is not the final lme4-based transfer
-model used for the manuscript. Use it only as exploratory code unless the
-transfer-effect estimation is replaced with a fully nested mixed-model pipeline.
+suppressPackageStartupMessages({
+  library(lme4)
+})
 
-Predict age of acquisition (AoA) from the multiscale decoding measures in the
-Guo et al. bilingual picture-naming dataset (OpenNeuro ds005455).
+parse_args = function() {
+  args = commandArgs(trailingOnly = TRUE)
+  out = list()
 
-This script tests three kinds of predictors:
-1. whole-cortex decoding strength
-2. local cortical extent
-3. cross-subject transfer-derived teacher and learner effects
-
-The transfer-based part is handled fold by fold. For each held-out subject, the
-script rebuilds the transfer-derived teacher and learner effects from the raw
-parcel-mean trial data and then uses those fold-specific effects to predict that
-subject's AoA.
-
-Required input files
---------------------
-- distributed_parcel_mean_decoding_by_subject.csv
-- local_z_extent_by_subject.csv
-- subject_metadata.csv
-
-subject_metadata.csv must contain:
-- subject
-- AoA
-
-Required raw data
------------------
-- duo-cogcon/ single-trial beta images
-- duo-cogcon/derivatives/tsnr/*_tsnr.nii.gz
-
-Outputs
--------
-- age_of_acquisition_prediction_summary.csv
-- age_of_acquisition_prediction_predictions_long.csv
-- nested_transfer_effects_by_fold.csv
-"""
-
-from pathlib import Path
-
-import nibabel as nib
-import numpy as np
-import pandas as pd
-from nilearn import image
-from nilearn.datasets import fetch_atlas_schaefer_2018
-from nilearn.maskers import NiftiLabelsMasker
-from scipy import stats
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression, Ridge
-from sklearn.metrics import balanced_accuracy_score, r2_score
-from sklearn.model_selection import LeaveOneOut
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-
-
-DATA_ROOT = Path("duo-cogcon")
-TASK = "LanguageControl"
-TRIAL_COLUMN = "trial_type"
-
-WHOLE_CORTEX_CSV = Path("outputs/whole_cortex/distributed_parcel_mean_decoding_by_subject.csv")
-LOCAL_EXTENT_CSV = Path("outputs/local_parcelwise/local_z_extent_by_subject.csv")
-SUBJECT_METADATA_CSV = Path("subject_metadata.csv")
-TSNR_DIR = DATA_ROOT / "derivatives" / "tsnr"
-
-SUMMARY_OUT_CSV = Path("age_of_acquisition_prediction_summary.csv")
-PREDICTIONS_OUT_CSV = Path("age_of_acquisition_prediction_predictions_long.csv")
-TRANSFER_EFFECTS_OUT_CSV = Path("nested_transfer_effects_by_fold.csv")
-
-N_ROIS = 800
-YEO_NETWORKS = 7
-RESOLUTION_MM = 2
-RANDOM_STATE = 42
-
-
-def parse_run_number(path):
-    return int(path.name.split("run-")[1].split("_")[0])
-
-
-def make_labels(trial_labels):
-    trial_labels = pd.Series(trial_labels).astype(str)
-    return trial_labels.str.contains("L1").astype(int).to_numpy()
-
-
-def make_ridge():
-    return Pipeline(
-        steps=[
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
-            ("ridge", Ridge(alpha=1.0)),
-        ]
-    )
-
-
-def logistic_model():
-    return LogisticRegression(
-        penalty="l2",
-        C=0.01,
-        solver="lbfgs",
-        max_iter=1000,
-        random_state=RANDOM_STATE,
-    )
-
-
-def prediction_summary(pred_df):
-    observed = pred_df["observed"].to_numpy(float)
-    predicted = pred_df["predicted"].to_numpy(float)
-    r, p = stats.pearsonr(observed, predicted)
-    rho, ps = stats.spearmanr(observed, predicted)
-    return {
-        "n": len(pred_df),
-        "pearson_r": r,
-        "pearson_p": p,
-        "spearman_rho": rho,
-        "spearman_p": ps,
-        "cv_r2": r2_score(observed, predicted),
+  i = 1
+  while (i <= length(args)) {
+    key = args[[i]]
+    if (!startsWith(key, "--")) {
+      stop(paste("Unexpected argument:", key))
     }
+    if (i == length(args)) {
+      stop(paste("Missing value for", key))
+    }
+    out[[sub("^--", "", key)]] = args[[i + 1]]
+    i = i + 2
+  }
 
+  required = c("transfer", "self-decoding", "qc", "metadata", "out-dir")
+  missing = setdiff(required, names(out))
+  if (length(missing) > 0) {
+    stop(paste("Missing required arguments:", paste(missing, collapse = ", ")))
+  }
 
-def loo_predictions(df, predictors, outcome):
-    cols = ["subject"] + predictors + [outcome]
-    tmp = df[cols].replace([np.inf, -np.inf], np.nan).dropna().reset_index(drop=True)
+  out
+}
 
-    X = tmp[predictors].to_numpy(float)
-    y = tmp[outcome].to_numpy(float)
-    pred = np.full(len(tmp), np.nan)
+zscore_with = function(x, center, scale_value) {
+  (x - center) / scale_value
+}
 
-    loo = LeaveOneOut()
-    for train_idx, test_idx in loo.split(X, y):
-        model = make_ridge()
-        model.fit(X[train_idx], y[train_idx])
-        pred[test_idx] = model.predict(X[test_idx])
+train_standardizer = function(subject_covariates, train_subjects) {
+  train_cov = subject_covariates[subject_covariates$subject %in% train_subjects, ]
+  list(
+    selfacc_mean = mean(train_cov$selfacc),
+    selfacc_sd = sd(train_cov$selfacc),
+    tsnr_mean = mean(train_cov$tsnr),
+    tsnr_sd = sd(train_cov$tsnr)
+  )
+}
 
-    out = tmp[["subject"]].copy()
-    out["observed"] = y
-    out["predicted"] = pred
-    return out
+add_standardized_terms = function(df, scaler) {
+  df$teacher_selfacc_z = zscore_with(df$teacher_selfacc, scaler$selfacc_mean, scaler$selfacc_sd)
+  df$learner_selfacc_z = zscore_with(df$learner_selfacc, scaler$selfacc_mean, scaler$selfacc_sd)
+  df$teacher_tsnr_z = zscore_with(df$teacher_tsnr, scaler$tsnr_mean, scaler$tsnr_sd)
+  df$learner_tsnr_z = zscore_with(df$learner_tsnr, scaler$tsnr_mean, scaler$tsnr_sd)
+  df
+}
 
+fixed_predict = function(dat, beta) {
+  beta[["(Intercept)"]] +
+    beta[["teacher_selfacc_z"]] * dat$teacher_selfacc_z +
+    beta[["learner_selfacc_z"]] * dat$learner_selfacc_z +
+    beta[["teacher_tsnr_z"]] * dat$teacher_tsnr_z +
+    beta[["learner_tsnr_z"]] * dat$learner_tsnr_z +
+    beta[["teacher_selfacc_z:teacher_tsnr_z"]] * dat$teacher_selfacc_z * dat$teacher_tsnr_z +
+    beta[["learner_selfacc_z:learner_tsnr_z"]] * dat$learner_selfacc_z * dat$learner_tsnr_z
+}
 
-def compute_subject_mean_tsnr(subject):
-    tsnr_files = sorted(
-        TSNR_DIR.glob(f"{subject}_task-{TASK}_run-*_tsnr.nii.gz")
+score_model = function(model_name, observed, predicted) {
+  ok = is.finite(observed) & is.finite(predicted)
+  observed = observed[ok]
+  predicted = predicted[ok]
+
+  r_test = cor.test(observed, predicted)
+  spearman_test = suppressWarnings(cor.test(observed, predicted, method = "spearman"))
+  cv_r2 = 1 - sum((observed - predicted)^2) / sum((observed - mean(observed))^2)
+
+  data.frame(
+    model = model_name,
+    n = length(observed),
+    pearson_r = unname(r_test$estimate),
+    pearson_p = r_test$p.value,
+    spearman_rho = unname(spearman_test$estimate),
+    spearman_p = spearman_test$p.value,
+    cv_r2 = cv_r2
+  )
+}
+
+loo_lm_predictions = function(subject_df, predictors, outcome, model_name) {
+  cols = c("subject", outcome, predictors)
+  dat = subject_df[, cols]
+  dat = dat[complete.cases(dat), ]
+
+  rows = list()
+  for (target in dat$subject) {
+    train = dat[dat$subject != target, ]
+    test = dat[dat$subject == target, ]
+
+    formula = as.formula(paste(outcome, "~", paste(predictors, collapse = " + ")))
+    fit = lm(formula, data = train)
+    pred = predict(fit, newdata = test)
+
+    rows[[length(rows) + 1]] = data.frame(
+      subject = target,
+      observed = test[[outcome]],
+      predicted = as.numeric(pred),
+      model = model_name
     )
+  }
 
-    if len(tsnr_files) == 0:
-        return np.nan
+  do.call(rbind, rows)
+}
 
-    run_means = []
-    for path in tsnr_files:
-        img = nib.load(path)
-        data = np.asarray(img.dataobj, dtype=float)
-        vals = data[np.isfinite(data) & (data != 0)]
-        if vals.size == 0:
-            continue
-        run_means.append(vals.mean())
+args = parse_args()
+out_dir = args[["out-dir"]]
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-    if len(run_means) == 0:
-        return np.nan
+transfer = read.csv(args[["transfer"]], stringsAsFactors = FALSE)
+self = read.csv(args[["self-decoding"]], stringsAsFactors = FALSE)
+qc = read.csv(args[["qc"]], stringsAsFactors = FALSE)
+metadata = read.csv(args[["metadata"]], stringsAsFactors = FALSE)
 
-    return float(np.mean(run_means))
+self = self[, c("subject", "balanced_accuracy")]
+names(self)[names(self) == "balanced_accuracy"] = "selfacc"
 
+qc = qc[, c("subject", "mean_tsnr")]
+names(qc)[names(qc) == "mean_tsnr"] = "tsnr"
 
-def load_subject_trial_data(subject, masker):
-    beta_files = sorted(
-        DATA_ROOT.glob(f"**/{subject}_task-{TASK}_run-*_singletrial-Act.nii.gz")
+metadata = metadata[, c("subject", "AoA")]
+
+subject_df = merge(metadata, self, by = "subject")
+subject_df = merge(subject_df, qc, by = "subject")
+
+if ("local-extent" %in% names(args)) {
+  local = read.csv(args[["local-extent"]], stringsAsFactors = FALSE)
+  local_cols = intersect(c("subject", "prop_z_gt_1p64"), names(local))
+  if (!all(c("subject", "prop_z_gt_1p64") %in% local_cols)) {
+    stop("--local-extent must contain subject and prop_z_gt_1p64")
+  }
+  subject_df = merge(subject_df, local[, c("subject", "prop_z_gt_1p64")], by = "subject")
+}
+
+subject_covariates = subject_df[, c("subject", "selfacc", "tsnr")]
+
+df0 = transfer
+if ("same_subject" %in% names(df0)) {
+  df0 = df0[df0$same_subject %in% c(FALSE, "False", "FALSE", 0), ]
+} else {
+  df0 = df0[df0$train_subject != df0$test_subject, ]
+}
+
+df0$teacher = df0$train_subject
+df0$learner = df0$test_subject
+
+df0 = merge(df0, setNames(self, c("teacher", "teacher_selfacc")), by = "teacher")
+df0 = merge(df0, setNames(self, c("learner", "learner_selfacc")), by = "learner")
+df0 = merge(df0, setNames(qc, c("teacher", "teacher_tsnr")), by = "teacher")
+df0 = merge(df0, setNames(qc, c("learner", "learner_tsnr")), by = "learner")
+
+subjects = sort(intersect(unique(df0$teacher), subject_df$subject))
+
+fit_formula = balanced_accuracy ~
+  teacher_selfacc_z + learner_selfacc_z +
+  teacher_tsnr_z + learner_tsnr_z +
+  teacher_selfacc_z:teacher_tsnr_z +
+  learner_selfacc_z:learner_tsnr_z +
+  (1 | teacher) + (1 | learner)
+
+fold_rows = list()
+effect_rows = list()
+
+for (target in subjects) {
+  train_subjects = setdiff(subjects, target)
+  scaler = train_standardizer(subject_covariates, train_subjects)
+
+  train_pairs = df0[
+    df0$teacher %in% train_subjects & df0$learner %in% train_subjects,
+  ]
+  train_pairs = add_standardized_terms(train_pairs, scaler)
+
+  fit = lmer(fit_formula, data = train_pairs, REML = TRUE)
+
+  teacher_re = ranef(fit)$teacher
+  learner_re = ranef(fit)$learner
+  teacher_blup = setNames(teacher_re[, 1], rownames(teacher_re))
+  learner_blup = setNames(learner_re[, 1], rownames(learner_re))
+  beta = fixef(fit)
+
+  train_effects = data.frame(
+    subject = train_subjects,
+    teacher_effect = as.numeric(teacher_blup[train_subjects]),
+    learner_effect = as.numeric(learner_blup[train_subjects])
+  )
+  train_effects = merge(train_effects, subject_df, by = "subject", all.x = TRUE)
+
+  out_rows = df0[df0$teacher == target & df0$learner %in% train_subjects, ]
+  out_rows = add_standardized_terms(out_rows, scaler)
+  out_fixed = fixed_predict(out_rows, beta)
+  heldout_teacher = mean(
+    out_rows$balanced_accuracy - out_fixed - learner_blup[out_rows$learner]
+  )
+
+  in_rows = df0[df0$learner == target & df0$teacher %in% train_subjects, ]
+  in_rows = add_standardized_terms(in_rows, scaler)
+  in_fixed = fixed_predict(in_rows, beta)
+  heldout_learner = mean(
+    in_rows$balanced_accuracy - in_fixed - teacher_blup[in_rows$teacher]
+  )
+
+  target_row = subject_df[subject_df$subject == target, ][1, ]
+
+  fit_teacher = lm(AoA ~ teacher_effect, data = train_effects)
+  fit_learner = lm(AoA ~ learner_effect, data = train_effects)
+  fit_both = lm(AoA ~ teacher_effect + learner_effect, data = train_effects)
+  fit_learner_self = lm(AoA ~ learner_effect + selfacc, data = train_effects)
+
+  pred_teacher = predict(fit_teacher, newdata = data.frame(teacher_effect = heldout_teacher))
+  pred_learner = predict(fit_learner, newdata = data.frame(learner_effect = heldout_learner))
+  pred_both = predict(
+    fit_both,
+    newdata = data.frame(
+      teacher_effect = heldout_teacher,
+      learner_effect = heldout_learner
     )
-    event_files = sorted(
-        DATA_ROOT.glob(f"**/{subject}_task-{TASK}_run-*_events.tsv")
+  )
+  pred_learner_self = predict(
+    fit_learner_self,
+    newdata = data.frame(
+      learner_effect = heldout_learner,
+      selfacc = target_row$selfacc
     )
-
-    if len(beta_files) == 0 or len(event_files) == 0:
-        return None, None, None
-
-    beta_by_run = {parse_run_number(p): p for p in beta_files}
-    event_by_run = {parse_run_number(p): p for p in event_files}
-    runs = sorted(set(beta_by_run) & set(event_by_run))
-
-    trial_imgs = []
-    trial_labels = []
-    groups = []
-
-    for run in runs:
-        beta_file = beta_by_run[run]
-        event_file = event_by_run[run]
-
-        events = pd.read_csv(event_file, sep="\t")
-        img = nib.load(beta_file)
-
-        if TRIAL_COLUMN not in events.columns:
-            continue
-        if img.shape[-1] != len(events):
-            continue
-
-        for idx in range(img.shape[-1]):
-            trial_imgs.append(img.slicer[..., idx])
-
-        trial_labels.extend(events[TRIAL_COLUMN].tolist())
-        groups.extend([run] * len(events))
-
-    if len(trial_imgs) == 0:
-        return None, None, None
-
-    X = masker.fit_transform(image.concat_imgs(trial_imgs))
-    y = make_labels(trial_labels)
-    groups = np.array(groups)
-
-    if len(np.unique(y)) < 2:
-        return None, None, None
-
-    return X, y, groups
-
-
-def transfer_score(train_X, train_y, test_X, test_y):
-    scaler = StandardScaler()
-    Xtr = scaler.fit_transform(train_X)
-    Xte = scaler.transform(test_X)
-
-    clf = logistic_model()
-    clf.fit(Xtr, train_y)
-    yhat = clf.predict(Xte)
-    return float(balanced_accuracy_score(test_y, yhat))
-
-
-def build_transfer_table(subjects, subject_trials):
-    rows = []
-
-    for teacher in subjects:
-        Xtr, ytr, _ = subject_trials[teacher]
-        for learner in subjects:
-            if learner == teacher:
-                continue
-            Xte, yte, _ = subject_trials[learner]
-            score = transfer_score(Xtr, ytr, Xte, yte)
-            rows.append(
-                {
-                    "train_subject": teacher,
-                    "test_subject": learner,
-                    "balanced_accuracy": score,
-                }
-            )
-
-    return pd.DataFrame(rows)
-
-
-def build_transfer_design(df, subject_df):
-    subj = subject_df.set_index("subject")
-    out = df.copy()
-
-    out["teacher_selfacc"] = out["train_subject"].map(subj["balanced_accuracy"])
-    out["learner_selfacc"] = out["test_subject"].map(subj["balanced_accuracy"])
-    out["teacher_tsnr"] = out["train_subject"].map(subj["mean_tsnr"])
-    out["learner_tsnr"] = out["test_subject"].map(subj["mean_tsnr"])
-
-    selfacc_mean = subj["balanced_accuracy"].mean()
-    selfacc_sd = subj["balanced_accuracy"].std(ddof=0)
-    tsnr_mean = subj["mean_tsnr"].mean()
-    tsnr_sd = subj["mean_tsnr"].std(ddof=0)
-
-    out["teacher_selfacc_z"] = (out["teacher_selfacc"] - selfacc_mean) / selfacc_sd
-    out["learner_selfacc_z"] = (out["learner_selfacc"] - selfacc_mean) / selfacc_sd
-    out["teacher_tsnr_z"] = (out["teacher_tsnr"] - tsnr_mean) / tsnr_sd
-    out["learner_tsnr_z"] = (out["learner_tsnr"] - tsnr_mean) / tsnr_sd
-
-    return out
-
-
-def design_matrix(df):
-    return np.column_stack(
-        [
-            np.ones(len(df)),
-            df["teacher_selfacc_z"].to_numpy(float),
-            df["learner_selfacc_z"].to_numpy(float),
-            df["teacher_tsnr_z"].to_numpy(float),
-            df["learner_tsnr_z"].to_numpy(float),
-            (df["teacher_selfacc_z"] * df["teacher_tsnr_z"]).to_numpy(float),
-            (df["learner_selfacc_z"] * df["learner_tsnr_z"]).to_numpy(float),
-        ]
-    )
-
-
-def estimate_additive_effects(resid_df, subjects, n_iter=30):
-    u = pd.Series(0.0, index=subjects)
-    v = pd.Series(0.0, index=subjects)
-
-    for _ in range(n_iter):
-        u_new = {}
-        for s in subjects:
-            vals = resid_df.loc[resid_df["train_subject"] == s, ["test_subject", "resid"]]
-            u_new[s] = np.mean(vals["resid"].to_numpy(float) - v.loc[vals["test_subject"]].to_numpy(float))
-        u = pd.Series(u_new).astype(float)
-        u = u - u.mean()
-
-        v_new = {}
-        for s in subjects:
-            vals = resid_df.loc[resid_df["test_subject"] == s, ["train_subject", "resid"]]
-            v_new[s] = np.mean(vals["resid"].to_numpy(float) - u.loc[vals["train_subject"]].to_numpy(float))
-        v = pd.Series(v_new).astype(float)
-        v = v - v.mean()
-
-    return u, v
-
-
-def estimate_heldout_effects(heldout, transfer_df, u_train, v_train):
-    teacher_rows = transfer_df.loc[transfer_df["train_subject"] == heldout, ["test_subject", "resid"]].copy()
-    learner_rows = transfer_df.loc[transfer_df["test_subject"] == heldout, ["train_subject", "resid"]].copy()
-
-    teacher_rows = teacher_rows.loc[teacher_rows["test_subject"].isin(v_train.index)]
-    learner_rows = learner_rows.loc[learner_rows["train_subject"].isin(u_train.index)]
-
-    if len(teacher_rows) == 0 or len(learner_rows) == 0:
-        return np.nan, np.nan
-
-    teacher_effect = np.mean(
-        teacher_rows["resid"].to_numpy(float) - v_train.loc[teacher_rows["test_subject"]].to_numpy(float)
-    )
-    learner_effect = np.mean(
-        learner_rows["resid"].to_numpy(float) - u_train.loc[learner_rows["train_subject"]].to_numpy(float)
-    )
-
-    return float(teacher_effect), float(learner_effect)
-
-
-def nested_transfer_aoa_predictions(subject_df, masker):
-    subjects = subject_df["subject"].tolist()
-
-    subject_trials = {}
-    for subject in subjects:
-        X, y, groups = load_subject_trial_data(subject, masker)
-        if X is None:
-            raise ValueError(f"Missing or unusable raw trial data for {subject}")
-        subject_trials[subject] = (X, y, groups)
-
-    pred_teacher = []
-    pred_learner = []
-    pred_both = []
-    pred_learner_self = []
-    effect_rows = []
-
-    for heldout in subjects:
-        train_subjects = [s for s in subjects if s != heldout]
-
-        transfer_subjects = train_subjects + [heldout]
-        transfer_df = build_transfer_table(transfer_subjects, subject_trials)
-
-        train_sub_df = subject_df.loc[subject_df["subject"].isin(train_subjects)].copy()
-
-        train_pairs = transfer_df.loc[
-            transfer_df["train_subject"].isin(train_subjects) &
-            transfer_df["test_subject"].isin(train_subjects)
-        ].copy()
-
-        heldout_pairs = transfer_df.loc[
-            ((transfer_df["train_subject"] == heldout) & transfer_df["test_subject"].isin(train_subjects)) |
-            ((transfer_df["test_subject"] == heldout) & transfer_df["train_subject"].isin(train_subjects))
-        ].copy()
-
-        train_pairs = build_transfer_design(train_pairs, train_sub_df)
-        heldout_pairs = build_transfer_design(heldout_pairs, train_sub_df)
-
-        X_train = design_matrix(train_pairs)
-        y_train = train_pairs["balanced_accuracy"].to_numpy(float)
-        beta = np.linalg.lstsq(X_train, y_train, rcond=None)[0]
-
-        train_pairs["fixed_pred"] = X_train @ beta
-        train_pairs["resid"] = train_pairs["balanced_accuracy"] - train_pairs["fixed_pred"]
-
-        X_held = design_matrix(heldout_pairs)
-        heldout_pairs["fixed_pred"] = X_held @ beta
-        heldout_pairs["resid"] = heldout_pairs["balanced_accuracy"] - heldout_pairs["fixed_pred"]
-
-        u_train, v_train = estimate_additive_effects(
-            train_pairs[["train_subject", "test_subject", "resid"]],
-            train_subjects,
-        )
-        u_hold, v_hold = estimate_heldout_effects(heldout, heldout_pairs, u_train, v_train)
-
-        effect_rows.append(
-            {
-                "subject": heldout,
-                "teacher_effect": u_hold,
-                "learner_effect": v_hold,
-            }
-        )
-
-        train_effect_df = pd.DataFrame(
-            {
-                "subject": train_subjects,
-                "teacher_effect": u_train.loc[train_subjects].to_numpy(float),
-                "learner_effect": v_train.loc[train_subjects].to_numpy(float),
-            }
-        ).merge(
-            train_sub_df[["subject", "AoA", "balanced_accuracy"]],
-            on="subject",
-            how="left",
-        )
-
-        heldout_self = float(
-            subject_df.loc[subject_df["subject"] == heldout, "balanced_accuracy"].iloc[0]
-        )
-
-        model_teacher = make_ridge()
-        model_teacher.fit(
-            train_effect_df[["teacher_effect"]].to_numpy(float),
-            train_effect_df["AoA"].to_numpy(float),
-        )
-        pred_teacher.append(
-            float(model_teacher.predict(pd.DataFrame([{"teacher_effect": u_hold}]))[0])
-        )
-
-        model_learner = make_ridge()
-        model_learner.fit(
-            train_effect_df[["learner_effect"]].to_numpy(float),
-            train_effect_df["AoA"].to_numpy(float),
-        )
-        pred_learner.append(
-            float(model_learner.predict(pd.DataFrame([{"learner_effect": v_hold}]))[0])
-        )
-
-        model_both = make_ridge()
-        model_both.fit(
-            train_effect_df[["teacher_effect", "learner_effect"]].to_numpy(float),
-            train_effect_df["AoA"].to_numpy(float),
-        )
-        pred_both.append(
-            float(
-                model_both.predict(
-                    pd.DataFrame([{"teacher_effect": u_hold, "learner_effect": v_hold}])
-                )[0]
-            )
-        )
-
-        model_learner_self = make_ridge()
-        model_learner_self.fit(
-            train_effect_df[["learner_effect", "balanced_accuracy"]].to_numpy(float),
-            train_effect_df["AoA"].to_numpy(float),
-        )
-        pred_learner_self.append(
-            float(
-                model_learner_self.predict(
-                    pd.DataFrame([{"learner_effect": v_hold, "balanced_accuracy": heldout_self}])
-                )[0]
-            )
-        )
-
-        print(f"Finished nested transfer fold for {heldout}", flush=True)
-
-    out = subject_df[["subject", "AoA"]].copy().rename(columns={"AoA": "observed"})
-    out["pred_teacher"] = pred_teacher
-    out["pred_learner"] = pred_learner
-    out["pred_both"] = pred_both
-    out["pred_learner_self"] = pred_learner_self
-
-    return out, pd.DataFrame(effect_rows)
-
-
-metadata = pd.read_csv(SUBJECT_METADATA_CSV)
-whole_cortex = pd.read_csv(WHOLE_CORTEX_CSV)
-local_extent = pd.read_csv(LOCAL_EXTENT_CSV)
-
-required_meta_cols = {"subject", "AoA"}
-missing_meta = required_meta_cols - set(metadata.columns)
-if missing_meta:
-    raise ValueError(f"subject_metadata.csv is missing required columns: {sorted(missing_meta)}")
-
-metadata = metadata[["subject", "AoA"]].copy()
-metadata["mean_tsnr"] = metadata["subject"].map(compute_subject_mean_tsnr)
-
-subject_df = (
-    metadata
-    .merge(whole_cortex[["subject", "balanced_accuracy"]], on="subject", how="inner")
-    .merge(local_extent[["subject", "prop_z_gt_1p64"]], on="subject", how="inner")
+  )
+
+  fold_rows[[length(fold_rows) + 1]] = data.frame(
+    subject = target,
+    observed = target_row$AoA,
+    pred_teacher_effect = as.numeric(pred_teacher),
+    pred_learner_effect = as.numeric(pred_learner),
+    pred_teacher_plus_learner = as.numeric(pred_both),
+    pred_learner_plus_selfdecoding = as.numeric(pred_learner_self)
+  )
+
+  effect_rows[[length(effect_rows) + 1]] = data.frame(
+    subject = target,
+    AoA = target_row$AoA,
+    teacher_effect = heldout_teacher,
+    learner_effect = heldout_learner,
+    selfacc = target_row$selfacc,
+    tsnr = target_row$tsnr
+  )
+
+  cat("Finished nested AoA fold for", target, "\n")
+}
+
+transfer_predictions = do.call(rbind, fold_rows)
+transfer_effects = do.call(rbind, effect_rows)
+
+long_predictions = rbind(
+  data.frame(
+    subject = transfer_predictions$subject,
+    observed = transfer_predictions$observed,
+    predicted = transfer_predictions$pred_teacher_effect,
+    model = "Teacher effect"
+  ),
+  data.frame(
+    subject = transfer_predictions$subject,
+    observed = transfer_predictions$observed,
+    predicted = transfer_predictions$pred_learner_effect,
+    model = "Learner effect"
+  ),
+  data.frame(
+    subject = transfer_predictions$subject,
+    observed = transfer_predictions$observed,
+    predicted = transfer_predictions$pred_teacher_plus_learner,
+    model = "Teacher + Learner"
+  ),
+  data.frame(
+    subject = transfer_predictions$subject,
+    observed = transfer_predictions$observed,
+    predicted = transfer_predictions$pred_learner_plus_selfdecoding,
+    model = "Learner + self-decoding"
+  )
 )
 
-atlas = fetch_atlas_schaefer_2018(
-    n_rois=N_ROIS,
-    yeo_networks=YEO_NETWORKS,
-    resolution_mm=RESOLUTION_MM,
-)
-masker = NiftiLabelsMasker(
-    labels_img=atlas.maps,
-    standardize=False,
-    strategy="mean",
-    resampling_target="data",
-    verbose=0,
+baseline_predictions = list(
+  loo_lm_predictions(subject_df, c("selfacc"), "AoA", "Self whole-cortex")
 )
 
-rows = []
-pred_long = []
+if ("prop_z_gt_1p64" %in% names(subject_df)) {
+  baseline_predictions[[length(baseline_predictions) + 1]] =
+    loo_lm_predictions(subject_df, c("prop_z_gt_1p64"), "AoA", "Local extent")
+}
 
-baseline_specs = [
-    ("Self whole-cortex", ["balanced_accuracy"]),
-    ("Local extent", ["prop_z_gt_1p64"]),
-]
+all_predictions = rbind(do.call(rbind, baseline_predictions), long_predictions)
 
-for label, predictors in baseline_specs:
-    pred_df = loo_predictions(subject_df, predictors, "AoA")
-    rows.append({"label": label, **prediction_summary(pred_df)})
+summary_rows = do.call(
+  rbind,
+  lapply(
+    split(all_predictions, all_predictions$model),
+    function(x) score_model(x$model[1], x$observed, x$predicted)
+  )
+)
+summary_rows = summary_rows[order(summary_rows$cv_r2, decreasing = TRUE), ]
 
-    tmp = pred_df.copy()
-    tmp["model"] = label
-    pred_long.append(tmp)
+write.csv(transfer_predictions, file.path(out_dir, "age_of_acquisition_nested_lme4_predictions_wide.csv"), row.names = FALSE)
+write.csv(all_predictions, file.path(out_dir, "age_of_acquisition_nested_lme4_predictions_long.csv"), row.names = FALSE)
+write.csv(summary_rows, file.path(out_dir, "age_of_acquisition_nested_lme4_summary.csv"), row.names = FALSE)
+write.csv(transfer_effects, file.path(out_dir, "nested_transfer_effects_by_fold.csv"), row.names = FALSE)
 
-transfer_pred_df, transfer_effect_df = nested_transfer_aoa_predictions(subject_df, masker)
-transfer_effect_df.to_csv(TRANSFER_EFFECTS_OUT_CSV, index=False)
-
-transfer_specs = [
-    ("Teacher effect", "pred_teacher"),
-    ("Learner effect", "pred_learner"),
-    ("Teacher + Learner", "pred_both"),
-    ("Learner + self-decoding", "pred_learner_self"),
-]
-
-for label, pred_col in transfer_specs:
-    pred_df = transfer_pred_df[["subject", "observed", pred_col]].rename(columns={pred_col: "predicted"})
-    rows.append({"label": label, **prediction_summary(pred_df)})
-
-    tmp = pred_df.copy()
-    tmp["model"] = label
-    pred_long.append(tmp)
-
-summary_df = pd.DataFrame(rows).sort_values("cv_r2", ascending=False).reset_index(drop=True)
-pred_long_df = pd.concat(pred_long, ignore_index=True)
-
-summary_df.to_csv(SUMMARY_OUT_CSV, index=False)
-pred_long_df.to_csv(PREDICTIONS_OUT_CSV, index=False)
-
-print(summary_df)
+print(summary_rows)
