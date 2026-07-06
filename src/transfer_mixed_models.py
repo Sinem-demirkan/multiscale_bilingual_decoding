@@ -5,8 +5,6 @@ Crossed mixed-effects models for cross-subject transfer.
 This script uses pymer4's Python interface for mixed-effects models.
 """
 
-from __future__ import annotations
-
 import argparse
 from pathlib import Path
 
@@ -37,6 +35,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def require_pymer4():
+    # Returns the pymer4 `lmer` class. Imported lazily (rather than at module
+    # level) so the script can still be imported/used for non-modeling helpers
+    # (e.g. prepare_design) on machines without pymer4/R installed.
     try:
         from pymer4.models import lmer
     except ImportError as exc:
@@ -55,6 +56,7 @@ def as_pandas(obj) -> pd.DataFrame:
 
 
 def to_pymer_data(df: pd.DataFrame):
+    # pymer4 >= 0.9 expects a polars DataFrame, not pandas, so convert here.
     try:
         import polars as pl
     except ImportError as exc:
@@ -145,6 +147,9 @@ def variance_table(model) -> pd.DataFrame:
 
 
 def random_effect_table(model) -> pd.DataFrame:
+    # model.ranef is expected to be a dict keyed by grouping factor
+    # (e.g. {"teacher": DataFrame, "learner": DataFrame}) for crossed
+    # random effects, rather than a single combined DataFrame.
     ranef = model.ranef
     if not isinstance(ranef, dict):
         raise ValueError("Expected crossed random effects to be returned as a dict.")
