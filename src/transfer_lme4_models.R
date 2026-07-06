@@ -90,31 +90,32 @@ self = self[, c("subject", "balanced_accuracy")]
 names(self)[names(self) == "balanced_accuracy"] = "selfacc"
 qc = qc[, c("subject", "mean_tsnr")]
 
+subject_covariates = merge(self, qc, by = "subject")
+subject_covariates$selfacc_z = zscore(subject_covariates$selfacc)
+subject_covariates$tsnr_z = zscore(subject_covariates$mean_tsnr)
+
 df = transfer
 df = df[df$train_subject != df$test_subject, ]
 df$teacher = df$train_subject
 df$learner = df$test_subject
 
-df = merge(df, self, by.x = "teacher", by.y = "subject", all.x = TRUE)
+df = merge(df, subject_covariates, by.x = "teacher", by.y = "subject", all.x = TRUE)
 names(df)[names(df) == "selfacc"] = "teacher_selfacc"
-df = merge(df, self, by.x = "learner", by.y = "subject", all.x = TRUE)
-names(df)[names(df) == "selfacc"] = "learner_selfacc"
-
-df = merge(df, qc, by.x = "teacher", by.y = "subject", all.x = TRUE)
 names(df)[names(df) == "mean_tsnr"] = "teacher_tsnr"
-df = merge(df, qc, by.x = "learner", by.y = "subject", all.x = TRUE)
+names(df)[names(df) == "selfacc_z"] = "teacher_selfacc_z"
+names(df)[names(df) == "tsnr_z"] = "teacher_tsnr_z"
+
+df = merge(df, subject_covariates, by.x = "learner", by.y = "subject", all.x = TRUE)
+names(df)[names(df) == "selfacc"] = "learner_selfacc"
 names(df)[names(df) == "mean_tsnr"] = "learner_tsnr"
+names(df)[names(df) == "selfacc_z"] = "learner_selfacc_z"
+names(df)[names(df) == "tsnr_z"] = "learner_tsnr_z"
 
 df = df[complete.cases(df[, c(
   "balanced_accuracy",
   "teacher_selfacc", "learner_selfacc",
   "teacher_tsnr", "learner_tsnr"
 )]), ]
-
-df$teacher_selfacc_z = zscore(df$teacher_selfacc)
-df$learner_selfacc_z = zscore(df$learner_selfacc)
-df$teacher_tsnr_z = zscore(df$teacher_tsnr)
-df$learner_tsnr_z = zscore(df$learner_tsnr)
 
 unadjusted = lmer(
   balanced_accuracy ~ 1 + (1 | teacher) + (1 | learner),

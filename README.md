@@ -132,9 +132,10 @@ side-specific interactions.
   grouped permutation feature-importance variants. It defaults to
   `DATA_ROOT = Path("duo-cogcon")` and writes to
   `outputs/whole_cortex_classifier_variants`.
-- `src/age_of_acquisition_prediction` is an older Python implementation for
-  AoA prediction from decoding summaries. The final transfer random-effect
-  tables used in the manuscript should come from `src/transfer_lme4_models.R`.
+- `src/age_of_acquisition_prediction` is a legacy exploratory Python script for
+  AoA prediction. Do not treat it as the final lme4-based transfer prediction
+  analysis without replacing its transfer-effect estimation with a fully nested
+  mixed-model pipeline.
 
 ## Notes
 

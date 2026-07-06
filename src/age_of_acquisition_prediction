@@ -1,4 +1,10 @@
 """
+Legacy exploratory AoA prediction script.
+
+This script is kept for transparency but is not the final lme4-based transfer
+model used for the manuscript. Use it only as exploratory code unless the
+transfer-effect estimation is replaced with a fully nested mixed-model pipeline.
+
 Predict age of acquisition (AoA) from the multiscale decoding measures in the
 Guo et al. bilingual picture-naming dataset (OpenNeuro ds005455).
 
