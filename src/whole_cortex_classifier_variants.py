@@ -196,6 +196,26 @@ Yeo17 network PCA grouped PFI:
 - GROUP_FAMILY = "yeo17"
 """
 
+from pathlib import Path
+
+import nibabel as nib
+import numpy as np
+import pandas as pd
+from nilearn import image
+from nilearn.datasets import fetch_atlas_schaefer_2018
+from nilearn.maskers import NiftiLabelsMasker
+from sklearn.base import clone
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import balanced_accuracy_score
+from sklearn.model_selection import LeaveOneGroupOut
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+
+
+
+
 DATA_ROOT = Path("/home/sdemirka/fmri/duo-cogcon")
 TASK = "LanguageControl"
 START_SUB = 1
