@@ -1,13 +1,15 @@
 """
-Within-subject whole-cortex Schaefer-800 parcel-mean decoding for the Guo et al.
-bilingual picture-naming dataset (OpenNeuro ds005455).
+Within-subject whole-cortex Schaefer parcel-mean decoding.
 
-This script reproduces the main self whole-cortex language decoding analysis:
-single-trial beta images are converted to Schaefer-800 parcel means, and a
-logistic regression classifier is evaluated within subject using leave-one-run-out
-cross-validation.
+This script computes the main self-decoding measure used as whole-cortex
+decoding strength. It extracts one mean feature per Schaefer parcel from each
+single-trial beta image and evaluates L1-vs-L2 language decoding with
+leave-one-run-out cross-validation.
 """
 
+from __future__ import annotations
+
+import argparse
 from pathlib import Path
 
 import nibabel as nib
@@ -22,141 +24,189 @@ from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.preprocessing import StandardScaler
 
 
-DATA_ROOT = Path("/home/sdemirka/fmri/duo-cogcon")
-TASK = "LanguageControl"
-START_SUB = 1
-END_SUB = 77
-TRIAL_COLUMN = "trial_type"
-
-N_ROIS = 800
-YEO_NETWORKS = 7
-RESOLUTION_MM = 2
 RANDOM_STATE = 42
 
 
-def subject_id(n):
-  return f"sub-{n:03d}"
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run within-subject whole-cortex decoding.")
+    parser.add_argument("--data-root", type=Path, required=True, help="Path to duo-cogcon dataset root.")
+    parser.add_argument("--out-dir", type=Path, required=True, help="Directory for output CSV files.")
+    parser.add_argument("--task", default="LanguageControl")
+    parser.add_argument("--trial-column", default="trial_type")
+    parser.add_argument("--start-sub", type=int, default=1)
+    parser.add_argument("--end-sub", type=int, default=77)
+    parser.add_argument("--n-rois", type=int, default=800)
+    parser.add_argument("--yeo-networks", type=int, default=7, choices=[7, 17])
+    parser.add_argument("--resolution-mm", type=int, default=2)
+    return parser.parse_args()
 
 
-def parse_run_number(path):
-  return int(path.name.split("run-")[1].split("_")[0])
+def subject_id(n: int) -> str:
+    return f"sub-{n:03d}"
+
+
+def parse_run_number(path: Path) -> int:
+    return int(path.name.split("run-")[1].split("_")[0])
 
 
 def make_labels(trial_labels):
-  trial_labels = pd.Series(trial_labels).astype(str)
-  return trial_labels.str.contains("L1").astype(int).to_numpy()
+    trial_labels = pd.Series(trial_labels).astype(str)
+    labels = trial_labels.map(
+        lambda x: "L1" if x.startswith("L1") else ("L2" if x.startswith("L2") else np.nan)
+    )
+    keep = labels.notna().to_numpy()
+    return labels.to_numpy(), keep
 
 
-def load_subject_data(subject, masker):
-  beta_files = sorted(
-      DATA_ROOT.glob(f"**/{subject}_task-{TASK}_run-*_singletrial-Act.nii.gz")
-  )
-  event_files = sorted(
-      DATA_ROOT.glob(f"**/{subject}_task-{TASK}_run-*_events.tsv")
-  )
+def load_subject_data(subject: str, masker, args):
+    beta_files = sorted(
+        args.data_root.glob(f"**/{subject}_task-{args.task}_run-*_singletrial-Act.nii.gz")
+    )
+    event_files = sorted(
+        args.data_root.glob(f"**/{subject}_task-{args.task}_run-*_events.tsv")
+    )
 
-  if len(beta_files) == 0 or len(event_files) == 0:
-      return None, None, None
+    if len(beta_files) == 0 or len(event_files) == 0:
+        return None, None, None
 
-  beta_by_run = {parse_run_number(p): p for p in beta_files}
-  event_by_run = {parse_run_number(p): p for p in event_files}
-  runs = sorted(set(beta_by_run) & set(event_by_run))
+    beta_by_run = {parse_run_number(p): p for p in beta_files}
+    event_by_run = {parse_run_number(p): p for p in event_files}
+    runs = sorted(set(beta_by_run) & set(event_by_run))
 
-  trial_imgs = []
-  trial_labels = []
-  groups = []
+    trial_imgs = []
+    labels = []
+    groups = []
 
-  for run in runs:
-      beta_file = beta_by_run[run]
-      event_file = event_by_run[run]
+    for run in runs:
+        beta_file = beta_by_run[run]
+        event_file = event_by_run[run]
 
-      events = pd.read_csv(event_file, sep="\t")
-      img = nib.load(beta_file)
+        events = pd.read_csv(event_file, sep="\t")
+        img = nib.load(beta_file)
 
-      if TRIAL_COLUMN not in events.columns:
-          print(subject, f"missing column {TRIAL_COLUMN} in {event_file.name}")
-          continue
+        if args.trial_column not in events.columns:
+            print(subject, f"missing column {args.trial_column} in {event_file.name}")
+            continue
 
-      if img.shape[-1] != len(events):
-          print(subject, f"run {run} mismatch")
-          continue
+        if img.shape[-1] != len(events):
+            print(subject, f"run {run} mismatch")
+            continue
 
-      for idx in range(img.shape[-1]):
-          trial_imgs.append(img.slicer[..., idx])
+        y_full, keep = make_labels(events[args.trial_column])
+        keep_idx = np.where(keep)[0]
+        if len(keep_idx) == 0:
+            continue
 
-      trial_labels.extend(events[TRIAL_COLUMN].tolist())
-      groups.extend([run] * len(events))
+        for idx in keep_idx:
+            trial_imgs.append(img.slicer[..., idx])
+        labels.extend(y_full[keep_idx].tolist())
+        groups.extend([run] * len(keep_idx))
 
-  if len(trial_imgs) == 0:
-      return None, None, None
+    if len(trial_imgs) == 0:
+        return None, None, None
 
-  X = masker.fit_transform(image.concat_imgs(trial_imgs))
-  y = make_labels(trial_labels)
-  groups = np.array(groups)
+    X = masker.fit_transform(image.concat_imgs(trial_imgs))
+    y = np.asarray(labels)
+    groups = np.asarray(groups)
 
-  return X, y, groups
+    if set(np.unique(y)) != {"L1", "L2"}:
+        print(subject, "missing one language class")
+        return None, None, None
+
+    return X, y, groups
 
 
 def run_subject_cv(X, y, groups):
-  clf = LogisticRegression(
-      penalty="l2",
-      C=0.01,
-      solver="lbfgs",
-      max_iter=1000,
-      random_state=RANDOM_STATE,
-  )
+    clf = LogisticRegression(
+        penalty="l2",
+        C=0.01,
+        solver="lbfgs",
+        max_iter=1000,
+        random_state=RANDOM_STATE,
+    )
 
-  logo = LeaveOneGroupOut()
-  scores = []
+    logo = LeaveOneGroupOut()
+    fold_rows = []
+    scores = []
 
-  for train_idx, test_idx in logo.split(X, y, groups=groups):
-      scaler = StandardScaler()
-      X_train = scaler.fit_transform(X[train_idx])
-      X_test = scaler.transform(X[test_idx])
+    for fold, (train_idx, test_idx) in enumerate(logo.split(X, y, groups=groups), start=1):
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X[train_idx])
+        X_test = scaler.transform(X[test_idx])
 
-      clf.fit(X_train, y[train_idx])
-      y_pred = clf.predict(X_test)
-      score = balanced_accuracy_score(y[test_idx], y_pred)
-      scores.append(score)
+        clf.fit(X_train, y[train_idx])
+        y_pred = clf.predict(X_test)
+        score = balanced_accuracy_score(y[test_idx], y_pred)
+        scores.append(score)
+        fold_rows.append(
+            {
+                "fold": fold,
+                "test_run": int(groups[test_idx][0]),
+                "balanced_accuracy": float(score),
+            }
+        )
 
-  return float(np.mean(scores))
+    return float(np.mean(scores)), fold_rows
 
 
-atlas = fetch_atlas_schaefer_2018(
-  n_rois=N_ROIS,
-  yeo_networks=YEO_NETWORKS,
-  resolution_mm=RESOLUTION_MM,
-)
+def main():
+    args = parse_args()
+    args.out_dir.mkdir(parents=True, exist_ok=True)
 
-masker = NiftiLabelsMasker(
-  labels_img=atlas.maps,
-  standardize=False,
-  strategy="mean",
-  resampling_target="data",
-  verbose=0,
-)
+    atlas = fetch_atlas_schaefer_2018(
+        n_rois=args.n_rois,
+        yeo_networks=args.yeo_networks,
+        resolution_mm=args.resolution_mm,
+    )
 
-rows = []
+    masker = NiftiLabelsMasker(
+        labels_img=atlas.maps,
+        standardize=False,
+        strategy="mean",
+        resampling_target="data",
+        verbose=0,
+    )
 
-for sub in range(START_SUB, END_SUB + 1):
-  subject = subject_id(sub)
-  X, y, groups = load_subject_data(subject, masker)
+    rows = []
+    fold_rows = []
+    skipped = []
 
-  if X is None:
-      print(subject, "missing or unusable data")
-      continue
+    for sub in range(args.start_sub, args.end_sub + 1):
+        subject = subject_id(sub)
+        X, y, groups = load_subject_data(subject, masker, args)
 
-  score = run_subject_cv(X, y, groups)
+        if X is None:
+            print(subject, "missing or unusable data")
+            skipped.append({"subject": subject, "reason": "missing_or_unusable_data"})
+            continue
 
-  rows.append({
-      "subject": subject,
-      "balanced_accuracy": score,
-      "n_trials": len(y),
-      "n_runs": len(np.unique(groups)),
-  })
-  print(subject, round(score, 5))
+        score, folds = run_subject_cv(X, y, groups)
 
-results = pd.DataFrame(rows)
-results.to_csv("distributed_parcel_mean_decoding_by_subject.csv", index=False)
-print(results)
+        rows.append(
+            {
+                "subject": subject,
+                "balanced_accuracy": score,
+                "accuracy_minus_chance": score - 0.5,
+                "n_trials": int(len(y)),
+                "n_L1": int(np.sum(y == "L1")),
+                "n_L2": int(np.sum(y == "L2")),
+                "n_runs": int(len(np.unique(groups))),
+                "n_rois": args.n_rois,
+                "yeo_networks": args.yeo_networks,
+            }
+        )
+        for row in folds:
+            fold_rows.append({"subject": subject, **row})
+        print(subject, round(score, 5), flush=True)
 
+    results = pd.DataFrame(rows).sort_values("subject") if rows else pd.DataFrame()
+    folds = pd.DataFrame(fold_rows).sort_values(["subject", "fold"]) if fold_rows else pd.DataFrame()
+    skipped_df = pd.DataFrame(skipped)
+
+    results.to_csv(args.out_dir / "distributed_parcel_mean_decoding_by_subject.csv", index=False)
+    folds.to_csv(args.out_dir / "distributed_parcel_mean_decoding_folds.csv", index=False)
+    skipped_df.to_csv(args.out_dir / "distributed_parcel_mean_skipped_subjects.csv", index=False)
+
+
+if __name__ == "__main__":
+    main()

@@ -213,10 +213,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 
-
-
-
-DATA_ROOT = Path("/home/sdemirka/fmri/duo-cogcon")
+DATA_ROOT = Path("duo-cogcon")
 TASK = "LanguageControl"
 START_SUB = 1
 END_SUB = 77
@@ -239,6 +236,7 @@ N_PERM_REPEATS = 20         # used for grouped PFI analyses
 PCA_VARIANCE = 0.90         # only used for network_pca_grouped_pfi
 
 RANDOM_STATE = 42
+OUT_DIR = Path("outputs/whole_cortex_classifier_variants")
 
 
 def subject_id(n):
@@ -569,6 +567,7 @@ def run_network_pca_grouped_pfi(subject, X, y, groups, group_map):
 
 atlas = fetch_schaefer_atlas(N_ROIS, YEO_NETWORKS)
 masker = make_masker(atlas)
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 if ANALYSIS == "whole_cortex":
     rows = []
@@ -595,7 +594,7 @@ if ANALYSIS == "whole_cortex":
 
     results = pd.DataFrame(rows)
     out_csv = f"self_schaefer{N_ROIS}_yeo{YEO_NETWORKS}_{FEATURE_VARIANT}_{TARGET}_results.csv"
-    results.to_csv(out_csv, index=False)
+    results.to_csv(OUT_DIR / out_csv, index=False)
     print(results)
 
 elif ANALYSIS == "size_matched_grouped_pfi":
@@ -630,10 +629,10 @@ elif ANALYSIS == "size_matched_grouped_pfi":
     summary_df.columns = ["group_family", "group", "mean_importance_drop", "sd", "n_subjects"]
 
     base = f"size_matched_grouped_pfi_schaefer{N_ROIS}_{GROUP_FAMILY}_{TARGET}"
-    subset_df.to_csv(f"{base}_subsets.csv", index=False)
-    folds_df.to_csv(f"{base}_folds.csv", index=False)
-    by_subject_df.to_csv(f"{base}_by_subject.csv", index=False)
-    summary_df.to_csv(f"{base}_summary.csv", index=False)
+    subset_df.to_csv(OUT_DIR / f"{base}_subsets.csv", index=False)
+    folds_df.to_csv(OUT_DIR / f"{base}_folds.csv", index=False)
+    by_subject_df.to_csv(OUT_DIR / f"{base}_by_subject.csv", index=False)
+    summary_df.to_csv(OUT_DIR / f"{base}_summary.csv", index=False)
 
 elif ANALYSIS == "network_pca_grouped_pfi":
     group_map = build_group_map(N_ROIS, GROUP_FAMILY)
@@ -670,11 +669,10 @@ elif ANALYSIS == "network_pca_grouped_pfi":
     summary_df.columns = ["group_family", "group", "mean_importance_drop", "sd", "n_subjects"]
 
     base = f"network_pca_grouped_pfi_schaefer{N_ROIS}_{GROUP_FAMILY}_{TARGET}"
-    folds_df.to_csv(f"{base}_folds.csv", index=False)
-    by_subject_df.to_csv(f"{base}_by_subject.csv", index=False)
-    summary_df.to_csv(f"{base}_summary.csv", index=False)
-    pc_meta_df.to_csv(f"{base}_pc_meta.csv", index=False)
+    folds_df.to_csv(OUT_DIR / f"{base}_folds.csv", index=False)
+    by_subject_df.to_csv(OUT_DIR / f"{base}_by_subject.csv", index=False)
+    summary_df.to_csv(OUT_DIR / f"{base}_summary.csv", index=False)
+    pc_meta_df.to_csv(OUT_DIR / f"{base}_pc_meta.csv", index=False)
 
 else:
     raise ValueError("ANALYSIS must be 'whole_cortex', 'size_matched_grouped_pfi', or 'network_pca_grouped_pfi'")
-

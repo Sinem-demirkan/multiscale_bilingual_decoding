@@ -40,7 +40,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 
-DATA_ROOT = Path("/home/sdemirka/fmri/duo-cogcon")
+DATA_ROOT = Path("duo-cogcon")
 TASK = "LanguageControl"
 START_SUB = 1
 END_SUB = 77
@@ -52,7 +52,7 @@ FDR_ALPHA = 0.001
 N_JOBS = 8
 RANDOM_STATE = 42
 
-OUT_DIR = Path("local_searchlight_multivoxel")
+OUT_DIR = Path("outputs/local_searchlight_multivoxel")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -308,4 +308,3 @@ if not valid_subjects:
 print(f"Running group analysis for {len(valid_subjects)} subjects")
 run_group_map(valid_subjects)
 print(f"Outputs written to {OUT_DIR}")
-

@@ -51,12 +51,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 
-DATA_ROOT = Path("/home/sdemirka/fmri/duo-cogcon")
+DATA_ROOT = Path("duo-cogcon")
 TASK = "LanguageControl"
 TRIAL_COLUMN = "trial_type"
 
-WHOLE_CORTEX_CSV = Path("distributed_parcel_mean_decoding_by_subject.csv")
-LOCAL_EXTENT_CSV = Path("local_z_extent_by_subject.csv")
+WHOLE_CORTEX_CSV = Path("outputs/whole_cortex/distributed_parcel_mean_decoding_by_subject.csv")
+LOCAL_EXTENT_CSV = Path("outputs/local_parcelwise/local_z_extent_by_subject.csv")
 SUBJECT_METADATA_CSV = Path("subject_metadata.csv")
 TSNR_DIR = DATA_ROOT / "derivatives" / "tsnr"
 
@@ -522,4 +522,3 @@ summary_df.to_csv(SUMMARY_OUT_CSV, index=False)
 pred_long_df.to_csv(PREDICTIONS_OUT_CSV, index=False)
 
 print(summary_df)
-
