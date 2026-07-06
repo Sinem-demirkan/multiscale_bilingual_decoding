@@ -8,10 +8,9 @@ then estimated from heldout-to-training transfer pairs after subtracting the
 fixed-effects prediction and the relevant training-participant random effect.
 """
 
-from __future__ import annotations
-
 import argparse
 from pathlib import Path
+from typing import Dict, List, Union
 
 import numpy as np
 import pandas as pd
@@ -104,7 +103,10 @@ def zscore_with(x: pd.Series, mean: float, sd: float) -> pd.Series:
     return (x - mean) / sd
 
 
-def add_standardized_terms(df: pd.DataFrame, scaler: dict[str, float]) -> pd.DataFrame:
+# Note: uses typing.Dict instead of the built-in `dict[str, float]` subscript
+# so this module doesn't require `from __future__ import annotations` or
+# Python >= 3.9 to import cleanly.
+def add_standardized_terms(df: pd.DataFrame, scaler: Dict[str, float]) -> pd.DataFrame:
     out = df.copy()
     out["teacher_selfacc_z"] = zscore_with(out["teacher_selfacc"], scaler["selfacc_mean"], scaler["selfacc_sd"])
     out["learner_selfacc_z"] = zscore_with(out["learner_selfacc"], scaler["selfacc_mean"], scaler["selfacc_sd"])
@@ -113,7 +115,7 @@ def add_standardized_terms(df: pd.DataFrame, scaler: dict[str, float]) -> pd.Dat
     return out
 
 
-def train_standardizer(subject_covariates: pd.DataFrame, train_subjects: list[str]) -> dict[str, float]:
+def train_standardizer(subject_covariates: pd.DataFrame, train_subjects: List[str]) -> Dict[str, float]:
     train_cov = subject_covariates.loc[subject_covariates["subject"].isin(train_subjects)]
     return {
         "selfacc_mean": train_cov["selfacc"].mean(),
@@ -183,6 +185,9 @@ def fit_lmer(data: pd.DataFrame, reml: bool):
 
 
 def random_effects(model, group: str) -> pd.Series:
+    # model.ranef is expected to be a dict keyed by grouping factor
+    # (e.g. {"teacher": DataFrame, "learner": DataFrame}) for crossed
+    # random effects, rather than a single combined DataFrame.
     ranef = model.ranef
     if not isinstance(ranef, dict):
         raise ValueError("Expected crossed random effects to be returned as a dict.")
@@ -198,7 +203,7 @@ def fixed_prediction(model, data: pd.DataFrame) -> np.ndarray:
     return np.asarray(model.predict(to_pymer_data(data), use_rfx=False), dtype=float)
 
 
-def loo_linear_predictions(subject_df: pd.DataFrame, predictors: list[str], model_name: str) -> pd.DataFrame:
+def loo_linear_predictions(subject_df: pd.DataFrame, predictors: List[str], model_name: str) -> pd.DataFrame:
     dat = subject_df[["subject", "AoA", *predictors]].dropna().reset_index(drop=True)
     rows = []
 
@@ -213,7 +218,9 @@ def loo_linear_predictions(subject_df: pd.DataFrame, predictors: list[str], mode
     return pd.DataFrame(rows)
 
 
-def score_model(model_name: str, observed: pd.Series, predicted: pd.Series) -> dict[str, float | str | int]:
+# Return type uses typing.Union instead of `float | str | int` so this
+# module doesn't require Python >= 3.10 or the __future__ annotations import.
+def score_model(model_name: str, observed: pd.Series, predicted: pd.Series) -> Dict[str, Union[float, str, int]]:
     keep = np.isfinite(observed) & np.isfinite(predicted)
     obs = np.asarray(observed[keep], dtype=float)
     pred = np.asarray(predicted[keep], dtype=float)
@@ -234,7 +241,7 @@ def nested_transfer_predictions(
     df0: pd.DataFrame,
     subject_df: pd.DataFrame,
     subject_covariates: pd.DataFrame,
-    subjects: list[str],
+    subjects: List[str],
     reml: bool,
 ):
     prediction_rows = []
