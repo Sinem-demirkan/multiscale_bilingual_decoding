@@ -102,25 +102,28 @@ from step 3 with the self-decoding output from step 1 and a subject-level QC
 file containing `subject` and `mean_tsnr`.
 
 ```bash
-Rscript src/transfer_lme4_models.R \
+python src/transfer_mixed_models.py \
   --transfer outputs/cross_subject_transfer/cross_subject_transfer_long.csv \
   --self-decoding outputs/whole_cortex/distributed_parcel_mean_decoding_by_subject.csv \
   --qc /path/to/languagecontrol_qc_by_subject.csv \
-  --out-dir outputs/transfer_lme4
+  --out-dir outputs/transfer_mixed
 ```
 
 Outputs:
 
-- `outputs/transfer_lme4/lme4_unadjusted_variance_components.csv`
-- `outputs/transfer_lme4/lme4_unadjusted_subject_effects_long.csv`
-- `outputs/transfer_lme4/lme4_variance_components.csv`
-- `outputs/transfer_lme4/lme4_subject_effects_long.csv`
-- `outputs/transfer_lme4/lme4_fixed_effects.csv`
+- `outputs/transfer_mixed/mixed_unadjusted_variance_components.csv`
+- `outputs/transfer_mixed/mixed_unadjusted_subject_effects_long.csv`
+- `outputs/transfer_mixed/mixed_variance_components.csv`
+- `outputs/transfer_mixed/mixed_subject_effects_long.csv`
+- `outputs/transfer_mixed/mixed_fixed_effects.csv`
 
 The unadjusted model estimates teacher, learner, and pairwise residual variance
 from transfer accuracy. The adjusted model additionally includes teacher and
 learner self-decoding accuracy, teacher and learner mean tSNR, and their
 side-specific interactions.
+
+These models are fit from Python using `pymer4`, so the analysis can be run
+from the Python pipeline while retaining formula-based mixed-effects syntax.
 
 ### 5. Nested AoA prediction from transfer effects
 
@@ -132,7 +135,7 @@ participant and the training participants. Finally, AoA prediction models are
 fit on the training participants and evaluated on the held-out participant.
 
 ```bash
-Rscript src/age_of_acquisition_prediction \
+python src/age_of_acquisition_prediction.py \
   --data-root /path/to/duo-cogcon \
   --transfer outputs/cross_subject_transfer/cross_subject_transfer_long.csv \
   --self-decoding outputs/whole_cortex/distributed_parcel_mean_decoding_by_subject.csv \
@@ -147,9 +150,9 @@ column has a nonstandard name, add `--aoa-column column_name`. You can also pass
 
 Outputs:
 
-- `outputs/age_of_acquisition/age_of_acquisition_nested_lme4_predictions_wide.csv`
-- `outputs/age_of_acquisition/age_of_acquisition_nested_lme4_predictions_long.csv`
-- `outputs/age_of_acquisition/age_of_acquisition_nested_lme4_summary.csv`
+- `outputs/age_of_acquisition/age_of_acquisition_nested_mixed_predictions_wide.csv`
+- `outputs/age_of_acquisition/age_of_acquisition_nested_mixed_predictions_long.csv`
+- `outputs/age_of_acquisition/age_of_acquisition_nested_mixed_summary.csv`
 - `outputs/age_of_acquisition/nested_transfer_effects_by_fold.csv`
 
 ### Optional scripts
