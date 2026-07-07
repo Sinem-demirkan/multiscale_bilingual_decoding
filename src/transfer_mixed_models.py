@@ -1,7 +1,6 @@
 """
 Crossed mixed-effects models for cross-subject transfer.
 
-This script uses pymer4's Python interface for mixed-effects models.
 """
 
 from pathlib import Path
@@ -70,63 +69,37 @@ def zscore(x: pd.Series) -> pd.Series:
 
 
 def build_tsnr_table(tsnr_dir: Path, task: str) -> pd.DataFrame:
-    # Prefer the dataset's own precomputed whole-brain mean tSNR image per
-    # subject/task (sub-XXX_task-<task>_tsnr.nii.gz, no run segment) -- this
-    # is the dataset paper's own QC computation, using whatever brain mask
-    # they used, rather than an approximation of it.
-    #
-    # Voxels <= 0 / non-finite are treated as background and excluded from
-    # the mean; adjust this if your tSNR maps use a different convention
-    # (e.g. NaN for background, or you have a separate brain mask file).
-    rows = []
-    whole_brain_files = sorted(tsnr_dir.glob(f"sub-*_task-{task}_tsnr.nii.gz"))
-    for f in whole_brain_files:
-        subject = f.name.split("_")[0]
-        data = nib.load(f).get_fdata()
-        valid = data[np.isfinite(data) & (data > 0)]
-        if valid.size == 0:
-            print(subject, "whole-brain tsnr file has no valid voxels, skipping")
-            continue
-        rows.append({"subject": subject, "mean_tsnr": float(valid.mean()), "source": "whole_brain_file"})
+    # For each subject/run, mean tSNR is the average of finite, nonzero
+    # voxels in that run's tSNR map (nonzero/finite voxels are treated as
+    # in-brain; zero/non-finite voxels are treated as background and
+    # excluded). Run-level means are then averaged across runs to obtain one
+    # language-task mean tSNR value per subject. Single method for every
+    # subject -- no whole-brain-file fallback/preference.
+    tsnr_files = sorted(tsnr_dir.glob(f"sub-*_task-{task}_run-*_tsnr.nii.gz"))
+    if len(tsnr_files) == 0:
+        raise FileNotFoundError(f"No tSNR files found in {tsnr_dir} for task {task}")
 
-    covered_subjects = {r["subject"] for r in rows}
-
-    # Fallback: for any subject without a whole-brain file, average that
-    # subject's per-run tSNR maps ourselves (sub-XXX_task-<task>_run-YY_tsnr.nii.gz).
-    run_files = sorted(tsnr_dir.glob(f"sub-*_task-{task}_run-*_tsnr.nii.gz"))
     run_rows = []
-    for f in run_files:
+    for f in tsnr_files:
         subject = f.name.split("_")[0]
-        if subject in covered_subjects:
-            continue
         run = int(f.name.split("run-")[1].split("_")[0])
+
         data = nib.load(f).get_fdata()
-        valid = data[np.isfinite(data) & (data > 0)]
+        valid = data[np.isfinite(data) & (data != 0)]
         if valid.size == 0:
             print(subject, f"run {run}", "no valid tSNR voxels, skipping")
             continue
+
         run_rows.append({"subject": subject, "run": run, "run_mean_tsnr": float(valid.mean())})
 
-    if run_rows:
-        run_level = pd.DataFrame(run_rows)
-        fallback = (
-            run_level.groupby("subject", as_index=False)["run_mean_tsnr"]
-            .mean()
-            .rename(columns={"run_mean_tsnr": "mean_tsnr"})
-        )
-        fallback["source"] = "per_run_average_fallback"
-        for subject in fallback["subject"]:
-            print(subject, "using per-run average fallback (no whole-brain tsnr file found)")
-        rows.extend(fallback.to_dict("records"))
-
-    if not rows:
-        raise FileNotFoundError(f"No tSNR files found in {tsnr_dir} for task {task}")
-
-    return (
-        pd.DataFrame(rows)[["subject", "mean_tsnr", "source"]]
-        .sort_values("subject")
-        .reset_index(drop=True)
+    run_level = pd.DataFrame(run_rows)
+    subject_level = (
+        run_level.groupby("subject", as_index=False)["run_mean_tsnr"]
+        .mean()
+        .rename(columns={"run_mean_tsnr": "mean_tsnr"})
     )
+    subject_level["source"] = "run_level_tsnr_maps"
+    return subject_level.sort_values("subject").reset_index(drop=True)
 
 
 def prepare_design(transfer_path: Path, self_path: Path, qc_df: pd.DataFrame) -> pd.DataFrame:
