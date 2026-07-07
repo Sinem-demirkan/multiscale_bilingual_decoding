@@ -1,4 +1,3 @@
-
 """
 Crossed mixed-effects models for cross-subject transfer.
 
