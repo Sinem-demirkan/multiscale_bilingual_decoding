@@ -1,15 +1,40 @@
-#!/usr/bin/env python
+
 """
 Crossed mixed-effects models for cross-subject transfer.
 
 This script uses pymer4's Python interface for mixed-effects models.
 """
 
-import argparse
 from pathlib import Path
 
+import nibabel as nib
 import numpy as np
 import pandas as pd
+from pymer4.models import lmer
+
+
+# Long-format cross-subject transfer results
+# (e.g. cross_subject_transfer_long.csv from the transfer decoding script)
+TRANSFER = Path("/home/sdemirka/fmri/duo-cogcon/outputs/cross_subject_transfer_long.csv")
+
+# Per-subject within-subject decoding results, used as a self-accuracy covariate
+# (e.g. distributed_parcel_mean_decoding_by_subject.csv)
+SELF_DECODING = Path("/home/sdemirka/fmri/duo-cogcon/outputs/distributed_parcel_mean_decoding_by_subject.csv")
+
+# Directory containing per-run tSNR maps, named like:
+# sub-001_task-LanguageControl_run-02_tsnr.nii.gz
+TSNR_DIR = Path("/home/sdemirka/fmri/duo-cogcon/derivatives/tsnr")
+
+# Where to write the design matrix and all model outputs
+OUT_DIR = Path("/home/sdemirka/fmri/duo-cogcon/outputs/mixed_models")
+
+# Must match the task name used in the tSNR filenames (sub-XXX_task-<TASK>_run-YY_tsnr.nii.gz)
+TASK = "LanguageControl"
+
+# Restricted maximum likelihood (REML=True) vs full maximum likelihood (REML=False).
+# REML is standard for reporting variance components / random effects;
+# switch to False only if you need likelihood-ratio tests between fixed effects.
+REML = True
 
 
 FORMULA_UNADJUSTED = "balanced_accuracy ~ 1 + (1 | teacher) + (1 | learner)"
@@ -22,29 +47,6 @@ FORMULA_ADJUSTED = (
     "learner_selfacc_z:learner_tsnr_z + "
     "(1 | teacher) + (1 | learner)"
 )
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fit pymer4 mixed-effects transfer models.")
-    parser.add_argument("--transfer", type=Path, required=True)
-    parser.add_argument("--self-decoding", type=Path, required=True)
-    parser.add_argument("--qc", type=Path, required=True)
-    parser.add_argument("--out-dir", type=Path, required=True)
-    parser.add_argument("--reml", action=argparse.BooleanOptionalAction, default=True)
-    return parser.parse_args()
-
-
-def require_pymer4():
-    # Returns the pymer4 `lmer` class. Imported lazily (rather than at module
-    # level) so the script can still be imported/used for non-modeling helpers
-    # (e.g. prepare_design) on machines without pymer4/R installed.
-    try:
-        from pymer4.models import lmer
-    except ImportError as exc:
-        raise ImportError(
-            "This script requires pymer4 >= 0.9 and its backend dependencies."
-        ) from exc
-    return lmer
 
 
 def as_pandas(obj) -> pd.DataFrame:
@@ -68,12 +70,43 @@ def zscore(x: pd.Series) -> pd.Series:
     return (x - x.mean()) / x.std(ddof=1)
 
 
-def prepare_design(transfer_path: Path, self_path: Path, qc_path: Path) -> pd.DataFrame:
+def build_tsnr_table(tsnr_dir: Path, task: str) -> pd.DataFrame:
+    # Averages per-run tSNR maps into a single mean_tsnr value per subject.
+    # Voxels <= 0 are treated as background/outside-brain and excluded from
+    # the mean; adjust this if your tSNR maps use a different convention
+    # (e.g. NaN for background, or a separate brain mask file).
+    tsnr_files = sorted(tsnr_dir.glob(f"sub-*_task-{task}_run-*_tsnr.nii.gz"))
+    if len(tsnr_files) == 0:
+        raise FileNotFoundError(f"No tSNR files found in {tsnr_dir} for task {task}")
+
+    rows = []
+    for f in tsnr_files:
+        subject = f.name.split("_")[0]
+        run = int(f.name.split("run-")[1].split("_")[0])
+
+        data = nib.load(f).get_fdata()
+        valid = data[np.isfinite(data) & (data > 0)]
+        if valid.size == 0:
+            print(subject, f"run {run}", "no valid tSNR voxels, skipping")
+            continue
+
+        rows.append({"subject": subject, "run": run, "run_mean_tsnr": float(valid.mean())})
+
+    run_level = pd.DataFrame(rows)
+    subject_level = (
+        run_level.groupby("subject", as_index=False)["run_mean_tsnr"]
+        .mean()
+        .rename(columns={"run_mean_tsnr": "mean_tsnr"})
+    )
+    return subject_level
+
+
+def prepare_design(transfer_path: Path, self_path: Path, qc_df: pd.DataFrame) -> pd.DataFrame:
     transfer = pd.read_csv(transfer_path)
     self_df = pd.read_csv(self_path)[["subject", "balanced_accuracy"]].rename(
         columns={"balanced_accuracy": "selfacc"}
     )
-    qc = pd.read_csv(qc_path)[["subject", "mean_tsnr"]].rename(columns={"mean_tsnr": "tsnr"})
+    qc = qc_df[["subject", "mean_tsnr"]].rename(columns={"mean_tsnr": "tsnr"})
 
     covariates = self_df.merge(qc, on="subject", how="inner")
     covariates["selfacc_z"] = zscore(covariates["selfacc"])
@@ -113,7 +146,6 @@ def prepare_design(transfer_path: Path, self_path: Path, qc_path: Path) -> pd.Da
 
 
 def fit_lmer(formula: str, data: pd.DataFrame, reml: bool = True):
-    lmer = require_pymer4()
     model = lmer(formula, data=to_pymer_data(data), REML=reml)
     model.fit(summary=False)
     return model
@@ -200,30 +232,36 @@ def write_logs(model, path: Path) -> None:
         f.write("\n")
 
 
-def main() -> None:
-    args = parse_args()
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    design = prepare_design(args.transfer, args.self_decoding, args.qc)
-    design.to_csv(args.out_dir / "mixed_transfer_design.csv", index=False)
+qc_df = build_tsnr_table(TSNR_DIR, TASK)
+qc_df.to_csv(OUT_DIR / "mean_tsnr_by_subject.csv", index=False)
 
-    unadjusted = fit_lmer(FORMULA_UNADJUSTED, design, reml=args.reml)
-    adjusted = fit_lmer(FORMULA_ADJUSTED, design, reml=args.reml)
+design = prepare_design(TRANSFER, SELF_DECODING, qc_df)
+design.to_csv(OUT_DIR / "mixed_transfer_design.csv", index=False)
 
-    variance_table(unadjusted).to_csv(
-        args.out_dir / "mixed_unadjusted_variance_components.csv", index=False
-    )
-    random_effect_table(unadjusted).to_csv(
-        args.out_dir / "mixed_unadjusted_subject_effects_long.csv", index=False
-    )
+unadjusted = fit_lmer(FORMULA_UNADJUSTED, design, reml=REML)
+adjusted = fit_lmer(FORMULA_ADJUSTED, design, reml=REML)
 
-    variance_table(adjusted).to_csv(args.out_dir / "mixed_variance_components.csv", index=False)
-    random_effect_table(adjusted).to_csv(args.out_dir / "mixed_subject_effects_long.csv", index=False)
-    fixed_effect_table(adjusted).to_csv(args.out_dir / "mixed_fixed_effects.csv", index=False)
+variance_table(unadjusted).to_csv(
+    OUT_DIR / "mixed_unadjusted_variance_components.csv", index=False
+)
+random_effect_table(unadjusted).to_csv(
+    OUT_DIR / "mixed_unadjusted_subject_effects_long.csv", index=False
+)
 
-    write_logs(unadjusted, args.out_dir / "mixed_unadjusted_summary.txt")
-    write_logs(adjusted, args.out_dir / "mixed_adjusted_summary.txt")
+variance_table(adjusted).to_csv(OUT_DIR / "mixed_variance_components.csv", index=False)
+random_effect_table(adjusted).to_csv(OUT_DIR / "mixed_subject_effects_long.csv", index=False)
+fixed_effect_table(adjusted).to_csv(OUT_DIR / "mixed_fixed_effects.csv", index=False)
 
+write_logs(unadjusted, OUT_DIR / "mixed_unadjusted_summary.txt")
+write_logs(adjusted, OUT_DIR / "mixed_adjusted_summary.txt")
 
-if __name__ == "__main__":
-    main()
+print("Unadjusted variance components:")
+print(variance_table(unadjusted))
+print()
+print("Adjusted variance components:")
+print(variance_table(adjusted))
+print()
+print("Adjusted fixed effects:")
+print(fixed_effect_table(adjusted))
