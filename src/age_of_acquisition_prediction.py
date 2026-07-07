@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """
 Nested leave-one-subject-out AoA prediction using pymer4 mixed models.
 
@@ -8,15 +7,47 @@ then estimated from heldout-to-training transfer pairs after subtracting the
 fixed-effects prediction and the relevant training-participant random effect.
 """
 
-import argparse
 from pathlib import Path
 from typing import Dict, List, Union
 
+import nibabel as nib
 import numpy as np
 import pandas as pd
+from pymer4.models import lmer
 from scipy import stats
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import r2_score
+
+
+# Path to participants.tsv (must contain a subject/participant_id column and an AoA column)
+PARTICIPANTS = Path("/home/sdemirka/fmri/duo-cogcon/participants.tsv")
+
+# Name of the AoA column in participants.tsv. Leave as None to auto-detect from
+# common names (AoA, aoa, age_of_acquisition, AgeOfAcquisition, age_acquisition).
+AOA_COLUMN = None
+
+# Long-format cross-subject transfer results (cross_subject_transfer_long.csv)
+TRANSFER = Path("/home/sdemirka/fmri/duo-cogcon/outputs/cross_subject_transfer_long.csv")
+
+# Per-subject within-subject decoding results (distributed_parcel_mean_decoding_by_subject.csv)
+SELF_DECODING = Path("/home/sdemirka/fmri/duo-cogcon/outputs/distributed_parcel_mean_decoding_by_subject.csv")
+
+# Optional: per-subject local-extent covariate CSV (must contain subject, prop_z_gt_1p64).
+# Set to None to skip the "Local extent" baseline model.
+LOCAL_EXTENT = None
+
+# Directory containing per-run tSNR maps, named like:
+# sub-001_task-LanguageControl_run-02_tsnr.nii.gz
+TSNR_DIR = Path("/home/sdemirka/fmri/duo-cogcon/derivatives/tsnr")
+
+# Must match the task name used in the tSNR filenames (sub-XXX_task-<TASK>_run-YY_tsnr.nii.gz)
+TASK = "LanguageControl"
+
+# Where to write all output CSVs
+OUT_DIR = Path("/home/sdemirka/fmri/duo-cogcon/outputs/nested_aoa")
+
+# Restricted maximum likelihood (REML=True) vs full maximum likelihood (REML=False).
+REML = True
 
 
 FORMULA = (
@@ -29,35 +60,6 @@ FORMULA = (
 )
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Nested AoA prediction using pymer4 transfer effects.")
-    parser.add_argument("--data-root", type=Path, help="Dataset root containing participants.tsv.")
-    parser.add_argument("--participants", type=Path, help="Path to participants.tsv.")
-    parser.add_argument("--aoa-column", help="AoA column name in participants.tsv.")
-    parser.add_argument("--transfer", type=Path, required=True)
-    parser.add_argument("--self-decoding", type=Path, required=True)
-    parser.add_argument("--local-extent", type=Path)
-    parser.add_argument("--qc", type=Path, required=True)
-    parser.add_argument("--out-dir", type=Path, required=True)
-    parser.add_argument("--reml", action=argparse.BooleanOptionalAction, default=True)
-    args = parser.parse_args()
-
-    if args.participants is None and args.data_root is None:
-        parser.error("Provide either --participants or --data-root.")
-
-    return args
-
-
-def require_pymer4():
-    try:
-        from pymer4.models import lmer
-    except ImportError as exc:
-        raise ImportError(
-            "This script requires pymer4 >= 0.9 and its backend dependencies."
-        ) from exc
-    return lmer
-
-
 def as_pandas(obj) -> pd.DataFrame:
     if isinstance(obj, pd.DataFrame):
         return obj.copy()
@@ -67,6 +69,7 @@ def as_pandas(obj) -> pd.DataFrame:
 
 
 def to_pymer_data(df: pd.DataFrame):
+    # pymer4 >= 0.9 expects a polars DataFrame, not pandas, so convert here.
     try:
         import polars as pl
     except ImportError as exc:
@@ -74,9 +77,39 @@ def to_pymer_data(df: pd.DataFrame):
     return pl.from_pandas(df)
 
 
-def read_participants(args: argparse.Namespace) -> pd.DataFrame:
-    path = args.participants if args.participants is not None else args.data_root / "participants.tsv"
-    participants = pd.read_csv(path, sep="\t")
+def build_tsnr_table(tsnr_dir: Path, task: str) -> pd.DataFrame:
+    # Averages per-run tSNR maps into a single mean_tsnr value per subject.
+    # Voxels <= 0 are treated as background/outside-brain and excluded from
+    # the mean; adjust this if your tSNR maps use a different convention
+    # (e.g. NaN for background, or a separate brain mask file).
+    tsnr_files = sorted(tsnr_dir.glob(f"sub-*_task-{task}_run-*_tsnr.nii.gz"))
+    if len(tsnr_files) == 0:
+        raise FileNotFoundError(f"No tSNR files found in {tsnr_dir} for task {task}")
+
+    rows = []
+    for f in tsnr_files:
+        subject = f.name.split("_")[0]
+        run = int(f.name.split("run-")[1].split("_")[0])
+
+        data = nib.load(f).get_fdata()
+        valid = data[np.isfinite(data) & (data > 0)]
+        if valid.size == 0:
+            print(subject, f"run {run}", "no valid tSNR voxels, skipping")
+            continue
+
+        rows.append({"subject": subject, "run": run, "run_mean_tsnr": float(valid.mean())})
+
+    run_level = pd.DataFrame(rows)
+    subject_level = (
+        run_level.groupby("subject", as_index=False)["run_mean_tsnr"]
+        .mean()
+        .rename(columns={"run_mean_tsnr": "mean_tsnr"})
+    )
+    return subject_level
+
+
+def read_participants(participants_path: Path, aoa_column) -> pd.DataFrame:
+    participants = pd.read_csv(participants_path, sep="\t")
 
     if "subject" in participants.columns:
         subject_col = "subject"
@@ -85,15 +118,15 @@ def read_participants(args: argparse.Namespace) -> pd.DataFrame:
     else:
         raise ValueError("participants.tsv must contain either subject or participant_id.")
 
-    if args.aoa_column:
-        aoa_col = args.aoa_column
+    if aoa_column:
+        aoa_col = aoa_column
         if aoa_col not in participants.columns:
-            raise ValueError(f"--aoa-column was not found in participants.tsv: {aoa_col}")
+            raise ValueError(f"AOA_COLUMN was not found in participants.tsv: {aoa_col}")
     else:
         candidates = ["AoA", "aoa", "age_of_acquisition", "AgeOfAcquisition", "age_acquisition"]
         found = [c for c in candidates if c in participants.columns]
         if not found:
-            raise ValueError("Could not find an AoA column. Pass --aoa-column with the correct column name.")
+            raise ValueError("Could not find an AoA column. Set AOA_COLUMN to the correct column name.")
         aoa_col = found[0]
 
     return participants[[subject_col, aoa_col]].rename(columns={subject_col: "subject", aoa_col: "AoA"})
@@ -103,9 +136,6 @@ def zscore_with(x: pd.Series, mean: float, sd: float) -> pd.Series:
     return (x - mean) / sd
 
 
-# Note: uses typing.Dict instead of the built-in `dict[str, float]` subscript
-# so this module doesn't require `from __future__ import annotations` or
-# Python >= 3.9 to import cleanly.
 def add_standardized_terms(df: pd.DataFrame, scaler: Dict[str, float]) -> pd.DataFrame:
     out = df.copy()
     out["teacher_selfacc_z"] = zscore_with(out["teacher_selfacc"], scaler["selfacc_mean"], scaler["selfacc_sd"])
@@ -125,21 +155,28 @@ def train_standardizer(subject_covariates: pd.DataFrame, train_subjects: List[st
     }
 
 
-def prepare_inputs(args: argparse.Namespace):
-    transfer = pd.read_csv(args.transfer)
-    self_df = pd.read_csv(args.self_decoding)[["subject", "balanced_accuracy"]].rename(
+def prepare_inputs(
+    transfer_path: Path,
+    self_path: Path,
+    qc_df: pd.DataFrame,
+    participants_path: Path,
+    aoa_column,
+    local_extent_path,
+):
+    transfer = pd.read_csv(transfer_path)
+    self_df = pd.read_csv(self_path)[["subject", "balanced_accuracy"]].rename(
         columns={"balanced_accuracy": "selfacc"}
     )
-    qc = pd.read_csv(args.qc)[["subject", "mean_tsnr"]].rename(columns={"mean_tsnr": "tsnr"})
-    participants = read_participants(args)
+    qc = qc_df[["subject", "mean_tsnr"]].rename(columns={"mean_tsnr": "tsnr"})
+    participants = read_participants(participants_path, aoa_column)
 
     subject_df = participants.merge(self_df, on="subject", how="inner").merge(qc, on="subject", how="inner")
 
-    if args.local_extent is not None:
-        local = pd.read_csv(args.local_extent)
+    if local_extent_path is not None:
+        local = pd.read_csv(local_extent_path)
         needed = {"subject", "prop_z_gt_1p64"}
         if not needed.issubset(local.columns):
-            raise ValueError("--local-extent must contain subject and prop_z_gt_1p64")
+            raise ValueError("LOCAL_EXTENT file must contain subject and prop_z_gt_1p64")
         subject_df = subject_df.merge(local[["subject", "prop_z_gt_1p64"]], on="subject", how="inner")
 
     if "same_subject" in transfer.columns:
@@ -178,7 +215,6 @@ def prepare_inputs(args: argparse.Namespace):
 
 
 def fit_lmer(data: pd.DataFrame, reml: bool):
-    lmer = require_pymer4()
     model = lmer(FORMULA, data=to_pymer_data(data), REML=reml)
     model.fit(summary=False)
     return model
@@ -218,8 +254,6 @@ def loo_linear_predictions(subject_df: pd.DataFrame, predictors: List[str], mode
     return pd.DataFrame(rows)
 
 
-# Return type uses typing.Union instead of `float | str | int` so this
-# module doesn't require Python >= 3.10 or the __future__ annotations import.
 def score_model(model_name: str, observed: pd.Series, predicted: pd.Series) -> Dict[str, Union[float, str, int]]:
     keep = np.isfinite(observed) & np.isfinite(predicted)
     obs = np.asarray(observed[keep], dtype=float)
@@ -326,51 +360,50 @@ def nested_transfer_predictions(
     return pd.DataFrame(prediction_rows), pd.DataFrame(effect_rows)
 
 
-def main() -> None:
-    args = parse_args()
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    df0, subject_df, subject_covariates, subjects = prepare_inputs(args)
-    transfer_predictions, transfer_effects = nested_transfer_predictions(
-        df0, subject_df, subject_covariates, subjects, reml=args.reml
-    )
+qc_df = build_tsnr_table(TSNR_DIR, TASK)
 
-    long_predictions = pd.concat(
-        [
-            transfer_predictions[["subject", "observed", "pred_teacher_effect"]]
-            .rename(columns={"pred_teacher_effect": "predicted"})
-            .assign(model="Teacher effect"),
-            transfer_predictions[["subject", "observed", "pred_learner_effect"]]
-            .rename(columns={"pred_learner_effect": "predicted"})
-            .assign(model="Learner effect"),
-            transfer_predictions[["subject", "observed", "pred_teacher_plus_learner"]]
-            .rename(columns={"pred_teacher_plus_learner": "predicted"})
-            .assign(model="Teacher + Learner"),
-            transfer_predictions[["subject", "observed", "pred_learner_plus_selfdecoding"]]
-            .rename(columns={"pred_learner_plus_selfdecoding": "predicted"})
-            .assign(model="Learner + self-decoding"),
-        ],
-        ignore_index=True,
-    )
+df0, subject_df, subject_covariates, subjects = prepare_inputs(
+    TRANSFER, SELF_DECODING, qc_df, PARTICIPANTS, AOA_COLUMN, LOCAL_EXTENT
+)
+transfer_predictions, transfer_effects = nested_transfer_predictions(
+    df0, subject_df, subject_covariates, subjects, reml=REML
+)
 
-    baseline_predictions = [loo_linear_predictions(subject_df, ["selfacc"], "Self whole-cortex")]
-    if "prop_z_gt_1p64" in subject_df.columns:
-        baseline_predictions.append(loo_linear_predictions(subject_df, ["prop_z_gt_1p64"], "Local extent"))
+long_predictions = pd.concat(
+    [
+        transfer_predictions[["subject", "observed", "pred_teacher_effect"]]
+        .rename(columns={"pred_teacher_effect": "predicted"})
+        .assign(model="Teacher effect"),
+        transfer_predictions[["subject", "observed", "pred_learner_effect"]]
+        .rename(columns={"pred_learner_effect": "predicted"})
+        .assign(model="Learner effect"),
+        transfer_predictions[["subject", "observed", "pred_teacher_plus_learner"]]
+        .rename(columns={"pred_teacher_plus_learner": "predicted"})
+        .assign(model="Teacher + Learner"),
+        transfer_predictions[["subject", "observed", "pred_learner_plus_selfdecoding"]]
+        .rename(columns={"pred_learner_plus_selfdecoding": "predicted"})
+        .assign(model="Learner + self-decoding"),
+    ],
+    ignore_index=True,
+)
 
-    all_predictions = pd.concat([*baseline_predictions, long_predictions], ignore_index=True)
-    summary = pd.DataFrame(
-        [
-            score_model(model, group["observed"], group["predicted"])
-            for model, group in all_predictions.groupby("model")
-        ]
-    ).sort_values("cv_r2", ascending=False)
+baseline_predictions = [loo_linear_predictions(subject_df, ["selfacc"], "Self whole-cortex")]
+if "prop_z_gt_1p64" in subject_df.columns:
+    baseline_predictions.append(loo_linear_predictions(subject_df, ["prop_z_gt_1p64"], "Local extent"))
 
-    transfer_predictions.to_csv(args.out_dir / "age_of_acquisition_nested_mixed_predictions_wide.csv", index=False)
-    all_predictions.to_csv(args.out_dir / "age_of_acquisition_nested_mixed_predictions_long.csv", index=False)
-    summary.to_csv(args.out_dir / "age_of_acquisition_nested_mixed_summary.csv", index=False)
-    transfer_effects.to_csv(args.out_dir / "nested_transfer_effects_by_fold.csv", index=False)
-    print(summary)
+all_predictions = pd.concat([*baseline_predictions, long_predictions], ignore_index=True)
+summary = pd.DataFrame(
+    [
+        score_model(model, group["observed"], group["predicted"])
+        for model, group in all_predictions.groupby("model")
+    ]
+).sort_values("cv_r2", ascending=False)
 
+transfer_predictions.to_csv(OUT_DIR / "age_of_acquisition_nested_mixed_predictions_wide.csv", index=False)
+all_predictions.to_csv(OUT_DIR / "age_of_acquisition_nested_mixed_predictions_long.csv", index=False)
+summary.to_csv(OUT_DIR / "age_of_acquisition_nested_mixed_summary.csv", index=False)
+transfer_effects.to_csv(OUT_DIR / "nested_transfer_effects_by_fold.csv", index=False)
 
-if __name__ == "__main__":
-    main()
+print(summary)
