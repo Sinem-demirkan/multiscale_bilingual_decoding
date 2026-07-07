@@ -213,7 +213,11 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 
-DATA_ROOT = Path("duo-cogcon")
+# Path to the root of your duo-cogcon dataset folder
+# (should contain the sub-XXX single-trial beta images and events.tsv files)
+DATA_ROOT = Path("/home/sdemirka/fmri/duo-cogcon")
+OUT_DIR = Path("/home/sdemirka/fmri/duo-cogcon/outputs")
+
 TASK = "LanguageControl"
 START_SUB = 1
 END_SUB = 77
@@ -236,7 +240,6 @@ N_PERM_REPEATS = 20         # used for grouped PFI analyses
 PCA_VARIANCE = 0.90         # only used for network_pca_grouped_pfi
 
 RANDOM_STATE = 42
-OUT_DIR = Path("outputs/whole_cortex_classifier_variants")
 
 
 def subject_id(n):
@@ -633,6 +636,7 @@ elif ANALYSIS == "size_matched_grouped_pfi":
     folds_df.to_csv(OUT_DIR / f"{base}_folds.csv", index=False)
     by_subject_df.to_csv(OUT_DIR / f"{base}_by_subject.csv", index=False)
     summary_df.to_csv(OUT_DIR / f"{base}_summary.csv", index=False)
+    print(summary_df)
 
 elif ANALYSIS == "network_pca_grouped_pfi":
     group_map = build_group_map(N_ROIS, GROUP_FAMILY)
@@ -673,6 +677,7 @@ elif ANALYSIS == "network_pca_grouped_pfi":
     by_subject_df.to_csv(OUT_DIR / f"{base}_by_subject.csv", index=False)
     summary_df.to_csv(OUT_DIR / f"{base}_summary.csv", index=False)
     pc_meta_df.to_csv(OUT_DIR / f"{base}_pc_meta.csv", index=False)
+    print(summary_df)
 
 else:
     raise ValueError("ANALYSIS must be 'whole_cortex', 'size_matched_grouped_pfi', or 'network_pca_grouped_pfi'")
