@@ -20,10 +20,6 @@ from sklearn.metrics import balanced_accuracy_score
 from sklearn.model_selection import LeaveOneGroupOut
 from sklearn.preprocessing import StandardScaler
 
-
-
-
-
 DATA_ROOT = Path("/home/sdemirka/fmri/duo-cogcon")  # Path to the root of your duo-cogcon dataset folder, (should contain the sub-XXX single-trial beta images and events.tsv files)
 
 TASK = "LanguageControl"
