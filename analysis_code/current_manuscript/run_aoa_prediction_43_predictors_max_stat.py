@@ -4,7 +4,6 @@ import argparse
 import numpy as np
 import pandas as pd
 from scipy import stats
-from sklearn.impute import SimpleImputer
 from sklearn.linear_model import Ridge
 from sklearn.metrics import r2_score
 from sklearn.model_selection import LeaveOneOut
@@ -211,7 +210,6 @@ def predictor_columns(df):
 def make_estimator(alpha):
     return Pipeline(
         steps=[
-            ("imputer", SimpleImputer(strategy="median")),
             ("scaler", StandardScaler()),
             ("ridge", Ridge(alpha=alpha)),
         ]
