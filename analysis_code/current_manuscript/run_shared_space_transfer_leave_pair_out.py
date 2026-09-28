@@ -142,9 +142,9 @@ def run_leave_pair_out(subjects, subject_X, subject_y):
     rows = []
     max_k = max(K_LIST)
     component_cache = {}
+    print(f"Running shared-dimension transfer for {len(subjects)} participants.", flush=True)
 
     for teacher in subjects:
-        print(f"Leave-pair-out shared-space transfer, teacher {teacher}", flush=True)
         for learner in subjects:
             if teacher == learner:
                 continue
@@ -254,7 +254,7 @@ def run_extent_subgroups(subjects, subject_X, subject_y):
     rows = []
     max_k = max(K_LIST)
     for group_name, group_subjects in groups.items():
-        print(f"Leave-pair-out subgroup {group_name}, n={len(group_subjects)}", flush=True)
+        print(f"Running extent subgroup {group_name} (n={len(group_subjects)}).", flush=True)
         component_cache = {}
         original_cache = {}
         for teacher in group_subjects:
@@ -363,10 +363,9 @@ def main():
     summary = summarize(transfer)
     subgroup_summary = run_extent_subgroups(subjects, subject_X, subject_y)
 
-    print("\nLeave-pair-out full-sample summary:")
-    print(summary.to_string(index=False))
-    print("\nLeave-pair-out extent subgroup summary:")
-    print(subgroup_summary.to_string(index=False))
+    print(f"Saved {OUT / 'shared_space_transfer_leave_pair_out_by_pair.csv'}")
+    print(f"Saved {OUT / 'shared_space_transfer_leave_pair_out_summary.csv'}")
+    print(f"Saved {OUT / 'shared_space_transfer_leave_pair_out_extent_subgroups_summary.csv'}")
 
 
 if __name__ == "__main__":

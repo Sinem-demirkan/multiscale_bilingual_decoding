@@ -230,16 +230,6 @@ def main():
     summary = pd.DataFrame(rows)
     summary.to_csv(AOA_SUMMARY, index=False)
 
-    print(summary[
-        [
-            "label",
-            "pearson_r",
-            "pearson_p",
-            "spearman_rho",
-            "spearman_p",
-            "cv_r2",
-        ]
-    ].to_string(index=False))
     print(f"Saved {PCA_BY_SUBJECT}")
     print(f"Saved {AOA_SUMMARY}")
 

@@ -135,8 +135,8 @@ def transfer_score(X_train, y_train, X_test, y_test):
 
 def run_full_cortical_pattern_same_preprocessing(subjects, subject_X, subject_y):
     rows = []
+    print(f"Running full cortical pattern transfer for {len(subjects)} participants.", flush=True)
     for teacher in subjects:
-        print(f"Full cortical pattern transfer with same preprocessing, teacher {teacher}", flush=True)
         for learner in subjects:
             if teacher == learner:
                 continue
@@ -167,8 +167,8 @@ def run_k800_sanity(subjects, subject_X, subject_y, full_pattern_df, n_pairs):
     }
 
     rows = []
+    print(f"Running k=800 sanity check on {len(chosen_pairs)} participant pairs.", flush=True)
     for a, b in chosen_pairs:
-        print(f"k=800 sanity check, pair {a}/{b}", flush=True)
         pca_subjects = [s for s in subjects if s not in {a, b}]
         X_pool = np.vstack([subject_X[s] for s in pca_subjects])
         pca = PCA(n_components=800, svd_solver="full")
@@ -198,8 +198,8 @@ def run_k800_sanity(subjects, subject_X, subject_y, full_pattern_df, n_pairs):
 def run_k1_shared_residual(subjects, subject_X, subject_y):
     rows = []
     component_cache = {}
+    print("Running k=1 shared-dimension and residual transfer.", flush=True)
     for teacher in subjects:
-        print(f"k=1 shared/residual transfer, teacher {teacher}", flush=True)
         for learner in subjects:
             if teacher == learner:
                 continue
@@ -547,11 +547,9 @@ def main():
 
     k_list = read_k_list(args.shared_script)
     differences = inspect_shared_script(args.shared_script, k_list)
-    print("Step 0 local state", flush=True)
     print(f"K_LIST: {k_list}", flush=True)
-    print(f"Differences from expected script state: {differences if differences else 'none detected'}", flush=True)
-    print(f"Existing shared transfer CSV: {args.shared_transfer_csv}", flush=True)
-    print(f"Existing teacher-standardized transfer CSV: {args.teacher_standardized_transfer_csv}", flush=True)
+    if differences:
+        print(f"Script check: {len(differences)} difference(s) found.", flush=True)
 
     subjects, subject_X, subject_y = load_subject_data(args.features_csv, args.labels_csv)
     if len(subjects) != 77:
@@ -606,7 +604,9 @@ def main():
     )
     report_path = args.out_dir / "REPORT.md"
     report_path.write_text(report + "\n")
-    print(report, flush=True)
+    print(f"Saved {summary_path}")
+    print(f"Saved {paired_path}")
+    print(f"Saved {report_path}")
 
 
 if __name__ == "__main__":

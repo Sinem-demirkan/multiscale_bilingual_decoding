@@ -6,8 +6,6 @@ import pandas as pd
 
 CANDIDATE_ROOTS = [
     Path("/home/sdemirka/fmri/recent"),
-    Path("/Users/sdemirka/Desktop/agent"),
-    Path("/Users/sdemirka/Desktop/etat civil/agent"),
 ]
 
 K_LIST = [1, 5, 10, 25, 50, 100, 200]
@@ -280,8 +278,7 @@ def main():
     out_path = paper / "results_bootstrap_contrasts.csv"
     out.to_csv(out_path, index=False)
 
-    print(out[["section", "contrast", "k", "formatted", "ci_excludes_zero"]].to_string(index=False))
-    print(f"\nSaved {out_path}")
+    print(f"Saved {out_path}")
 
 
 if __name__ == "__main__":

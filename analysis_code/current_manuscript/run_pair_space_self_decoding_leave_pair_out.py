@@ -152,9 +152,9 @@ def main():
 
     rows = []
     pca_cache = {}
+    print(f"Running within-participant decoding in shared dimensions for {len(subjects)} participants.", flush=True)
 
     for subject in subjects:
-        print(f"Pair-space self-decoding target {subject}", flush=True)
         for excluded_partner in subjects:
             if excluded_partner == subject:
                 continue
@@ -223,11 +223,6 @@ def main():
     print(f"Saved {pair_path}")
     print(f"Saved {participant_path}")
     print(f"Saved {summary_path}")
-    print(
-        summary[["n_components", "metric", "mean", "ci_low", "ci_high"]].to_string(
-            index=False
-        )
-    )
 
 
 if __name__ == "__main__":

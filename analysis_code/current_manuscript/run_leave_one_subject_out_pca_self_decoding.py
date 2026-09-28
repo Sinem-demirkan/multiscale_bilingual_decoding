@@ -130,8 +130,8 @@ def main():
     max_k = max(K_LIST)
 
     rows = []
+    print(f"Running leave-one-participant-out PCA self-decoding for {len(subjects)} participants.", flush=True)
     for subject in subjects:
-        print(f"Leave-one-subject-out PCA self-decoding: {subject}", flush=True)
         pca_subjects = [s for s in subjects if s != subject]
         x_pool = np.vstack([subject_x[s] for s in pca_subjects])
 
@@ -172,7 +172,6 @@ def main():
 
     print(f"Saved {long_path}")
     print(f"Saved {summary_path}")
-    print(summary[["n_components", "metric", "mean", "ci_low", "ci_high"]].to_string(index=False))
 
 
 if __name__ == "__main__":

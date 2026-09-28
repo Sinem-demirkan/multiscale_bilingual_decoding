@@ -8,8 +8,6 @@ from matplotlib.patches import Patch
 
 CANDIDATE_ROOTS = [
     Path("/home/sdemirka/fmri/recent"),
-    Path("/Users/sdemirka/Desktop/agent"),
-    Path("/Users/sdemirka/Desktop/etat civil/agent"),
 ]
 
 ROOT = next((path for path in CANDIDATE_ROOTS if path.exists()), CANDIDATE_ROOTS[0])
@@ -656,25 +654,6 @@ lipkin_difference = (
 mean, low, high = mean_ci95(lipkin_difference.to_numpy(), seed=BOOT_SEED + 702)
 print("\nPanel D - Lipkin language minus multiple demand")
 print(f"Mean difference [95% CI]: {mean:.2f} [{low:.2f}, {high:.2f}] pp")
-
-print("\nPanel C colors")
-print(f"All trials: {MULTIVOXEL_BLUE}")
-print(f"Repeat trials: {PARCEL_MEAN_BLUE}")
-print(f"Switch trials: {DEMEANED_MULTIVOXEL_BLUE}")
-print(f"Switch status: {LIGHT_GRAY}")
-
-print("\nPanel D - network feature importance")
-print(
-    network_plot_df[
-        [
-            "network_key",
-            "source",
-            "mean_importance_pp",
-            "ci_low_pp",
-            "ci_high_pp",
-        ]
-    ].to_string(index=False)
-)
 
 print(f"\nSaved PDF: {OUT_PDF}")
 print(f"Saved PNG: {OUT_PNG}")

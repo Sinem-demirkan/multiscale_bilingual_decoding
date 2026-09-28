@@ -225,8 +225,9 @@ def run_analysis(subjects, subject_x, subject_y, subject_run, k_list):
     run1, run2 = runs_by_subject[subjects[0]]
 
     max_k = max(k for k in k_list if k > 0)
-    pair_components = {}
     pair_signatures = {}
+    n_pairs = len(subjects) * (len(subjects) - 1) // 2
+    print(f"Fitting leave-both-out PCA spaces for {n_pairs} participant pairs.", flush=True)
 
     original_signatures = {}
     for subject in subjects:
@@ -239,11 +240,9 @@ def run_analysis(subjects, subject_x, subject_y, subject_run, k_list):
 
     for subject_a, subject_b in itertools.combinations(subjects, 2):
         pair_key = tuple(sorted((subject_a, subject_b)))
-        print(f"Leave-both-out residual signatures {subject_a}/{subject_b}", flush=True)
         components_all = fit_pair_components(
             subjects, subject_x, subject_a, subject_b, max_k
         )
-        pair_components[pair_key] = components_all
 
         for k in k_list:
             if k == 0:
@@ -261,7 +260,6 @@ def run_analysis(subjects, subject_x, subject_y, subject_run, k_list):
 
     rows = []
     for k in k_list:
-        print(f"Building run-split similarity matrix for k={k}", flush=True)
         for run1_subject in subjects:
             for run2_subject in subjects:
                 if k == 0:
@@ -311,8 +309,11 @@ def main():
     subjects, subject_x, subject_y, subject_run, positive, parcel_cols = load_subject_data(
         args.features_csv, args.labels_csv, args.positive_language_label
     )
-    print(f"Positive language label treated as English/L2: {positive!r}", flush=True)
-    print(f"Loaded {len(subjects)} subjects and {len(parcel_cols)} parcels.", flush=True)
+    print(
+        f"Loaded {len(subjects)} participants and {len(parcel_cols)} parcels; "
+        f"English/L2 label is {positive!r}.",
+        flush=True,
+    )
 
     long_df, summary = run_analysis(
         subjects, subject_x, subject_y, subject_run, sorted(args.k_list)
@@ -321,7 +322,6 @@ def main():
     summary_path = args.out_dir / "residual_language_contrast_run_split_fingerprint_summary.csv"
     long_df.to_csv(long_path, index=False)
     summary.to_csv(summary_path, index=False)
-    print(summary.to_string(index=False))
     print(f"Saved {long_path}")
     print(f"Saved {summary_path}")
 

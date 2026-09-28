@@ -298,9 +298,6 @@ def run_max_stat_permutation(table, predictors, alpha, n_permutations, seed):
             }
         )
 
-        if (permutation + 1) % 100 == 0:
-            print(f"Finished {permutation + 1} permutations", flush=True)
-
     return pd.DataFrame(null_rows)
 
 
@@ -386,7 +383,11 @@ def main():
     best = write_best_predictions(args.out_dir, observed_work, observed, predictions)
     write_run_summary(args.out_dir, table, observed, null_df, best, args.n_permutations)
 
-    print(observed.to_string(index=False))
+    print(
+        f"Best predictor: {best['label']} "
+        f"(r={best['pearson_r']:.3f}, R2={best['cv_r2']:.3f}, "
+        f"corrected p={best['corrected_p_max_stat']:.4g})"
+    )
     print(f"Saved {predictor_table_path}")
     print(f"Saved {observed_path}")
     print(f"Saved {null_path}")
