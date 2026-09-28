@@ -649,6 +649,14 @@ mean, low, high = mean_ci95((-visual_minus_other).to_numpy(), seed=BOOT_SEED + 7
 print("\nPanel D - mean other Yeo networks minus visual")
 print(f"Mean difference [95% CI]: {mean:.2f} [{low:.2f}, {high:.2f}] pp")
 
+lipkin_difference = (
+    lipkin_language_by_subject.set_index("subject")["importance_pp"]
+    - lipkin_md_by_subject.set_index("subject")["importance_pp"]
+).dropna()
+mean, low, high = mean_ci95(lipkin_difference.to_numpy(), seed=BOOT_SEED + 702)
+print("\nPanel D - Lipkin language minus multiple demand")
+print(f"Mean difference [95% CI]: {mean:.2f} [{low:.2f}, {high:.2f}] pp")
+
 print("\nPanel C colors")
 print(f"All trials: {MULTIVOXEL_BLUE}")
 print(f"Repeat trials: {PARCEL_MEAN_BLUE}")

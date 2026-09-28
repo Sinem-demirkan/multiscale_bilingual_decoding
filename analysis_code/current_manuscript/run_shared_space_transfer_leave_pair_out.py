@@ -3,7 +3,6 @@ import argparse
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import balanced_accuracy_score
@@ -23,7 +22,7 @@ LABELS = None
 TRANSFER = None
 SUBJECT_TABLE = None
 
-K_LIST = [5, 10, 25, 50, 100, 200]
+K_LIST = [1, 5, 10, 25, 50, 100, 200]
 
 
 def parse_args():
@@ -236,12 +235,6 @@ def summarize(shared_transfer):
                     "ci_low": ci_low,
                     "ci_high": ci_high,
                     "pair_level_mean": float(tmp[metric].mean()),
-                    "t_vs_chance": float(
-                        stats.ttest_1samp(participant_values, 0.5).statistic
-                    ),
-                    "p_vs_chance": float(
-                        stats.ttest_1samp(participant_values, 0.5).pvalue
-                    ),
                 }
             )
 

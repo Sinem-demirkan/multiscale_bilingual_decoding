@@ -3,7 +3,6 @@ import argparse
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import balanced_accuracy_score
@@ -118,8 +117,6 @@ def summarize(long_df):
                     "sd": float(np.std(x, ddof=1)),
                     "ci_low": ci_low,
                     "ci_high": ci_high,
-                    "t_vs_chance": float(stats.ttest_1samp(x, 0.5).statistic),
-                    "p_vs_chance": float(stats.ttest_1samp(x, 0.5).pvalue),
                 }
             )
     return pd.DataFrame(rows).sort_values(["n_components", "metric"]).reset_index(drop=True)
@@ -175,7 +172,7 @@ def main():
 
     print(f"Saved {long_path}")
     print(f"Saved {summary_path}")
-    print(summary[["n_components", "metric", "mean", "ci_low", "ci_high", "p_vs_chance"]].to_string(index=False))
+    print(summary[["n_components", "metric", "mean", "ci_low", "ci_high"]].to_string(index=False))
 
 
 if __name__ == "__main__":

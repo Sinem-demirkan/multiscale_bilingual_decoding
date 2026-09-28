@@ -6,7 +6,6 @@ import warnings
 
 import numpy as np
 import pandas as pd
-from scipy import stats
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import balanced_accuracy_score
@@ -383,20 +382,35 @@ def participant_summary(matched_df, teacher_df, shared_df):
     return summary, values
 
 
-def paired_differences(values, summary):
-    matched = values["matched_full"].to_numpy(float)
+def paired_differences(matched_df, shared_df, summary):
     matched_mean = float(summary.loc[summary["condition"].eq("matched_full"), "mean"].iloc[0])
     rows = []
     for condition in ["shared", "residual"]:
         for k in SUMMARY_K:
-            key = condition_key(condition, k)
-            x = values[key].to_numpy(float)
-            diff = x - matched
-            mean, ci_low, ci_high = bootstrap_mean_ci(
-                diff,
-                seed=BOOT_SEED + int(k),
+            value_col = f"{condition}_minus_matched_full"
+            metric = (
+                "shared_space_accuracy"
+                if condition == "shared"
+                else "residual_space_accuracy"
             )
-            ttest = stats.ttest_1samp(diff, 0.0)
+            tmp = (
+                shared_df.loc[shared_df["n_components"].astype(int).eq(k)]
+                .merge(
+                    matched_df[
+                        ["train_subject", "test_subject", "matched_full_accuracy"]
+                    ],
+                    on=["train_subject", "test_subject"],
+                    how="inner",
+                    validate="many_to_one",
+                )
+                .copy()
+            )
+            tmp[value_col] = tmp[metric] - tmp["matched_full_accuracy"]
+            mean, ci_low, ci_high = bootstrap_pair_cluster_mean_ci(
+                tmp,
+                value_col,
+                seed=BOOT_SEED + 700 + SUMMARY_K.index(int(k)),
+            )
             condition_mean = float(
                 summary.loc[
                     summary["condition"].eq(condition) & summary["k"].astype(str).eq(str(k)),
@@ -411,8 +425,6 @@ def paired_differences(values, summary):
                     "mean_difference": mean,
                     "ci_low": ci_low,
                     "ci_high": ci_high,
-                    "t_statistic": float(ttest.statistic),
-                    "p_value": float(ttest.pvalue),
                     "retained_fraction": retained,
                 }
             )
@@ -500,7 +512,7 @@ def make_report(
     for row in paired.itertuples(index=False):
         lines.append(
             f"- {row.condition} k={row.k}: mean_difference={row.mean_difference}, "
-            f"95% CI=[{row.ci_low}, {row.ci_high}], t={row.t_statistic}, p={row.p_value}"
+            f"95% CI=[{row.ci_low}, {row.ci_high}]"
         )
     lines.append("")
     lines.append("8. Retained fraction")
@@ -569,7 +581,7 @@ def main():
     summary_path = args.out_dir / "participant_level_transfer_summary.csv"
     summary.to_csv(summary_path, index=False)
 
-    paired = paired_differences(values, summary)
+    paired = paired_differences(matched, shared, summary)
     paired_path = args.out_dir / "paired_differences_vs_matched_full.csv"
     paired.to_csv(paired_path, index=False)
 
