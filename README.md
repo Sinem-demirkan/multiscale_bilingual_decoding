@@ -56,7 +56,7 @@ python src/local_searchlight_multivoxel.py
 Set `DATA_ROOT` and `OUT_DIR` at the top of the searchlight script before
 running.
 
-### 4. Cross-subject transfer
+### 4. Cross-participant transfer
 
 ```bash
 python src/whole_cortex_cross_subject_transfer.py \
@@ -80,7 +80,7 @@ python src/prepare_participant_table.py \
 
 If the AoA column is not detected automatically, add `--aoa-column COLUMN_NAME`.
 
-### 6. Population PCA and residual analyses
+### 6. Shared dimensions and residual analyses
 
 ```bash
 python analysis_code/current_manuscript/run_shared_space_transfer_leave_pair_out.py \
@@ -147,6 +147,6 @@ permutations with seed 42. To rerun the model from a saved predictor table, pass
 - Language labels come from `trial_type`: `L1*` is Chinese and `L2*` is English.
 - Decoding performance is balanced accuracy.
 - Whole-cortex and local decoding use leave-one-run-out cross-validation.
-- Cross-subject transfer uses off-diagonal teacher-learner pairs.
+- Cross-participant transfer uses off-diagonal teacher-learner pairs.
 - Downstream CSVs used by the manuscript scripts are produced by the earlier
   scripts above; no private local files are required.
