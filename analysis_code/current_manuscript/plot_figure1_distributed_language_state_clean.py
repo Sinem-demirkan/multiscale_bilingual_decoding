@@ -329,8 +329,8 @@ panel_c_values = {
 
 panel_c_colors = {
     "All trials": MULTIVOXEL_BLUE,
-    "Repeat trials": PARCEL_MEAN_BLUE,
-    "Switch trials": DEMEANED_MULTIVOXEL_BLUE,
+    "Repeat trials": DEMEANED_MULTIVOXEL_BLUE,
+    "Switch trials": PARCEL_MEAN_BLUE,
     "Switch status": LIGHT_GRAY,
 }
 
