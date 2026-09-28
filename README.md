@@ -98,16 +98,36 @@ Related within-participant PCA controls are in the same folder:
 
 Both take `--features-csv`, `--labels-csv`, and `--out-dir`.
 
+The run-split residual language-state similarity analysis used for Fig. 3C is:
+
+```bash
+python analysis_code/current_manuscript/run_residual_language_contrast_run_split_similarity_leave_pair_out.py \
+  --features-csv outputs/whole_cortex/whole_cortex_trialwise_parcel_features.csv \
+  --labels-csv outputs/whole_cortex/whole_cortex_trialwise_labels.csv \
+  --out-dir outputs/population_pca
+```
+
+This writes the 77 x 77 run-1 by run-2 similarity matrices and their summary
+CSV. For between-participant cells, residuals are computed in the
+leave-both-out PCA space for that participant pair. For within-participant
+cells, values are averaged across that participant's 76 leave-both-out spaces.
+
 ### 7. AoA prediction
 
 ```bash
-python analysis_code/current_manuscript/run_aoa_prediction_with_whole_cortex_pca50.py \
+python analysis_code/current_manuscript/run_aoa_prediction_43_predictors_max_stat.py \
   --participant-table-csv outputs/participants/participant_neural_measures.csv \
-  --leave-pair-transfer-csv outputs/population_pca/shared_space_transfer_leave_pair_out_by_pair.csv \
-  --features-csv outputs/whole_cortex/whole_cortex_trialwise_parcel_features.csv \
-  --labels-csv outputs/whole_cortex/whole_cortex_trialwise_labels.csv \
-  --out-dir outputs/aoa_prediction
+  --whole-cortex-by-subject-csv outputs/whole_cortex/distributed_parcel_mean_decoding_by_subject.csv \
+  --self-decoding-csv outputs/population_pca/pair_space_self_decoding_leave_pair_out_by_subject.csv \
+  --transfer-by-pair-csv outputs/population_pca/shared_space_transfer_leave_pair_out_by_pair.csv \
+  --out-dir outputs/aoa_prediction_43_predictors
 ```
+
+This is the manuscript AoA analysis: it builds the 43-predictor table, runs
+leave-one-participant-out ridge prediction for each predictor, and performs the
+max-statistic permutation test across predictors. By default it uses 10,000
+permutations with seed 42. To rerun the model from a saved predictor table, pass
+`--predictor-table-csv outputs/aoa_prediction_43_predictors/age_prediction_predictor_table_43_predictors.csv`.
 
 ## Notes
 
