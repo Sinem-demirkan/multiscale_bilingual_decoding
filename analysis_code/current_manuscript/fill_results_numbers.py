@@ -18,7 +18,6 @@ BOOT_SEED = 42
 def resolve_root():
     needed = [
         "paper_version/cross_subject_language_transfer/shared_space_transfer_leave_pair_out_by_pair_with_original.csv",
-        "paper_version/cross_subject_language_transfer/matched_full_pattern_transfer_reference/matched_full_pattern_transfer_by_pair.csv",
         "paper_version/cross_subject_language_transfer/pair_space_self_decoding_leave_pair_out_by_subject.csv",
         "paper_version/l1l2_switch_nonswitch_whole_cortex/by_subject.csv",
         "paper_version/network_pca_grouped_pfi/network_pca_grouped_pfi_by_subject.csv",
@@ -107,15 +106,29 @@ def main():
     transfer = pd.read_csv(
         transfer_dir / "shared_space_transfer_leave_pair_out_by_pair_with_original.csv"
     )
-    matched = pd.read_csv(
+    full_pattern_candidates = [
+        transfer_dir
+        / "full_cortical_pattern_same_preprocessing"
+        / "full_cortical_pattern_same_preprocessing_transfer_by_pair.csv",
         transfer_dir
         / "matched_full_pattern_transfer_reference"
-        / "matched_full_pattern_transfer_by_pair.csv"
+        / "matched_full_pattern_transfer_by_pair.csv",
+    ]
+    full_pattern_path = next(
+        (path for path in full_pattern_candidates if path.exists()),
+        None,
+    )
+    if full_pattern_path is None:
+        raise FileNotFoundError(
+            "Could not find the full cortical pattern same-preprocessing transfer CSV."
+        )
+    full_pattern = pd.read_csv(full_pattern_path).rename(
+        columns={"matched_full_accuracy": "full_cortical_pattern_accuracy"}
     )
     transfer = (
         transfer.drop(columns=["original_accuracy"], errors="ignore")
         .merge(
-            matched,
+            full_pattern,
             on=["train_subject", "test_subject"],
             how="left",
             validate="many_to_one",
@@ -149,15 +162,23 @@ def main():
     for k in K_LIST:
         tmp = transfer.loc[transfer["n_components"].astype(int).eq(k)].copy()
 
-        tmp["shared_minus_matched_full"] = (
-            tmp["shared_space_accuracy"] - tmp["matched_full_accuracy"]
+        tmp["shared_minus_full_cortical_pattern"] = (
+            tmp["shared_space_accuracy"] - tmp["full_cortical_pattern_accuracy"]
         )
         mean, low, high = bootstrap_pair_cluster_mean_ci(
             tmp,
-            "shared_minus_matched_full",
+            "shared_minus_full_cortical_pattern",
             seed=BOOT_SEED + 700 + K_LIST.index(k),
         )
-        add_row(rows, "transfer", "shared - matched full", k, mean, low, high)
+        add_row(
+            rows,
+            "transfer",
+            "shared - full cortical pattern, same preprocessing",
+            k,
+            mean,
+            low,
+            high,
+        )
 
         tmp["residual_above_chance"] = tmp["residual_space_accuracy"] - 0.5
         mean, low, high = bootstrap_pair_cluster_mean_ci(

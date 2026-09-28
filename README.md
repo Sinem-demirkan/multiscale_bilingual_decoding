@@ -98,6 +98,19 @@ Related within-participant PCA controls are in the same folder:
 
 Both take `--features-csv`, `--labels-csv`, and `--out-dir`.
 
+The same-preprocessing full cortical pattern transfer used as the black line in
+the cross-participant transfer figure is computed by:
+
+```bash
+python analysis_code/current_manuscript/run_full_cortical_pattern_same_preprocessing_transfer.py \
+  --features-csv outputs/whole_cortex/whole_cortex_trialwise_parcel_features.csv \
+  --labels-csv outputs/whole_cortex/whole_cortex_trialwise_labels.csv \
+  --shared-transfer-csv outputs/population_pca/shared_space_transfer_leave_pair_out_by_pair.csv \
+  --teacher-standardized-transfer-csv outputs/cross_subject_transfer/cross_subject_transfer_long.csv \
+  --within-self-csv outputs/population_pca/pair_space_self_decoding_leave_pair_out_by_subject.csv \
+  --out-dir outputs/full_cortical_pattern_same_preprocessing
+```
+
 The run-split residual language-state similarity analysis used for Fig. 3C is:
 
 ```bash
