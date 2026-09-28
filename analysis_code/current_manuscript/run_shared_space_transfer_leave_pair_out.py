@@ -14,6 +14,8 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 RANDOM_STATE = 42
+N_BOOT = 5000
+BOOT_SEED = 42
 
 OUT = None
 FEATURES = None
@@ -86,6 +88,57 @@ def transfer_score(X_train, y_train, X_test, y_test):
     return float(balanced_accuracy_score(y_test, clf.predict(X_test)))
 
 
+def participant_transfer_values(pair_df, value_col):
+    teacher = pair_df.groupby("train_subject")[value_col].mean()
+    learner = pair_df.groupby("test_subject")[value_col].mean()
+    subjects = sorted(set(teacher.index) | set(learner.index))
+    return np.asarray(
+        [
+            np.mean([teacher.loc[subject], learner.loc[subject]])
+            for subject in subjects
+        ],
+        dtype=float,
+    )
+
+
+def bootstrap_pair_cluster_mean_ci(
+    df,
+    value_col,
+    seed,
+    train_col="train_subject",
+    test_col="test_subject",
+):
+    work = df[[train_col, test_col, value_col]].dropna().copy()
+    participants = np.unique(
+        np.concatenate([work[train_col].to_numpy(), work[test_col].to_numpy()])
+    )
+    participant_index = {
+        participant: idx for idx, participant in enumerate(participants)
+    }
+    train_idx = work[train_col].map(participant_index).to_numpy()
+    test_idx = work[test_col].map(participant_index).to_numpy()
+    values = work[value_col].to_numpy(dtype=float)
+
+    mean = float(values.mean())
+    rng = np.random.default_rng(seed)
+    boot_means = []
+    n_participants = len(participants)
+
+    for _ in range(N_BOOT):
+        sampled = rng.integers(0, n_participants, size=n_participants)
+        multiplicity = np.bincount(sampled, minlength=n_participants)
+        pair_weights = (
+            multiplicity[train_idx] * multiplicity[test_idx]
+        ).astype(float)
+        total_weight = pair_weights.sum()
+        if total_weight == 0:
+            continue
+        boot_means.append(np.average(values, weights=pair_weights))
+
+    ci_low, ci_high = np.percentile(np.asarray(boot_means, dtype=float), [2.5, 97.5])
+    return mean, float(ci_low), float(ci_high)
+
+
 def run_leave_pair_out(subjects, subject_X, subject_y):
     rows = []
     max_k = max(K_LIST)
@@ -144,19 +197,51 @@ def summarize(shared_transfer):
 
     rows = []
     for k, tmp in merged.groupby("n_components"):
-        for metric in ["original_accuracy", "shared_space_accuracy", "residual_space_accuracy"]:
-            x = tmp[metric].to_numpy(float)
+        k_index = K_LIST.index(int(k))
+        for metric_i, metric in enumerate(
+            ["original_accuracy", "shared_space_accuracy", "residual_space_accuracy"]
+        ):
+            seed = BOOT_SEED + int(k) * 10 + metric_i
+            if metric == "original_accuracy":
+                seed = BOOT_SEED + 1000
+            elif metric == "shared_space_accuracy":
+                seed = BOOT_SEED + 100 + k_index
+            elif metric == "residual_space_accuracy":
+                seed = BOOT_SEED + 200 + k_index
+            mean, ci_low, ci_high = bootstrap_pair_cluster_mean_ci(
+                tmp,
+                metric,
+                seed=seed,
+            )
+            participant_values = participant_transfer_values(tmp, metric)
             rows.append(
                 {
                     "n_components": k,
                     "metric": metric,
-                    "n_pairs": len(x),
-                    "mean": float(np.mean(x)),
-                    "sd": float(np.std(x, ddof=1)),
-                    "ci_low": float(np.mean(x) - 1.96 * np.std(x, ddof=1) / np.sqrt(len(x))),
-                    "ci_high": float(np.mean(x) + 1.96 * np.std(x, ddof=1) / np.sqrt(len(x))),
-                    "t_vs_chance": float(stats.ttest_1samp(x, 0.5).statistic),
-                    "p_vs_chance_naive": float(stats.ttest_1samp(x, 0.5).pvalue),
+                    "n_pairs": int(len(tmp[metric].dropna())),
+                    "n_participants": int(
+                        len(
+                            np.unique(
+                                np.concatenate(
+                                    [
+                                        tmp["train_subject"].to_numpy(),
+                                        tmp["test_subject"].to_numpy(),
+                                    ]
+                                )
+                            )
+                        )
+                    ),
+                    "mean": mean,
+                    "sd": float(np.std(participant_values, ddof=1)),
+                    "ci_low": ci_low,
+                    "ci_high": ci_high,
+                    "pair_level_mean": float(tmp[metric].mean()),
+                    "t_vs_chance": float(
+                        stats.ttest_1samp(participant_values, 0.5).statistic
+                    ),
+                    "p_vs_chance": float(
+                        stats.ttest_1samp(participant_values, 0.5).pvalue
+                    ),
                 }
             )
 
@@ -233,18 +318,41 @@ def run_extent_subgroups(subjects, subject_X, subject_y):
 
     summary_rows = []
     for (group, k), tmp in out.groupby(["extent_group", "n_components"]):
-        for metric in ["original_accuracy", "shared_space_accuracy", "residual_space_accuracy"]:
-            x = tmp[metric].to_numpy(float)
+        for metric_i, metric in enumerate(
+            ["original_accuracy", "shared_space_accuracy", "residual_space_accuracy"]
+        ):
+            seed = BOOT_SEED + int(k) * 10 + metric_i
+            if metric == "original_accuracy":
+                seed = BOOT_SEED + 1000
+            mean, ci_low, ci_high = bootstrap_pair_cluster_mean_ci(
+                tmp,
+                metric,
+                seed=seed,
+            )
+            participant_values = participant_transfer_values(tmp, metric)
             summary_rows.append(
                 {
                     "extent_group": group,
                     "n_components": k,
                     "metric": metric,
-                    "n_pairs": len(x),
-                    "mean": float(np.mean(x)),
-                    "sd": float(np.std(x, ddof=1)),
-                    "ci_low": float(np.mean(x) - 1.96 * np.std(x, ddof=1) / np.sqrt(len(x))),
-                    "ci_high": float(np.mean(x) + 1.96 * np.std(x, ddof=1) / np.sqrt(len(x))),
+                    "n_pairs": int(len(tmp[metric].dropna())),
+                    "n_participants": int(
+                        len(
+                            np.unique(
+                                np.concatenate(
+                                    [
+                                        tmp["train_subject"].to_numpy(),
+                                        tmp["test_subject"].to_numpy(),
+                                    ]
+                                )
+                            )
+                        )
+                    ),
+                    "mean": mean,
+                    "sd": float(np.std(participant_values, ddof=1)),
+                    "ci_low": ci_low,
+                    "ci_high": ci_high,
+                    "pair_level_mean": float(tmp[metric].mean()),
                 }
             )
 

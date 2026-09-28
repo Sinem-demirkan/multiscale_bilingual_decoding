@@ -11,6 +11,8 @@ from sklearn.preprocessing import StandardScaler
 
 
 RANDOM_STATE = 42
+N_BOOT = 5000
+BOOT_SEED = 42
 
 OUT = None
 FEATURES = None
@@ -86,20 +88,36 @@ def loo_run_score(x, y, runs):
     return float(balanced_accuracy_score(y, preds))
 
 
+def bootstrap_mean_ci(values, seed):
+    x = np.asarray(values, dtype=float)
+    mean = float(np.mean(x))
+    rng = np.random.default_rng(seed)
+    indices = rng.integers(0, len(x), size=(N_BOOT, len(x)))
+    boot = x[indices].mean(axis=1)
+    ci_low, ci_high = np.percentile(boot, [2.5, 97.5])
+    return mean, float(ci_low), float(ci_high)
+
+
 def summarize(long_df):
     rows = []
     for k, tmp in long_df.groupby("n_components"):
-        for metric in ["original_accuracy", "shared_space_accuracy", "residual_space_accuracy"]:
+        for metric_i, metric in enumerate(
+            ["original_accuracy", "shared_space_accuracy", "residual_space_accuracy"]
+        ):
             x = tmp[metric].to_numpy(float)
+            mean, ci_low, ci_high = bootstrap_mean_ci(
+                x,
+                seed=BOOT_SEED + int(k) * 10 + metric_i,
+            )
             rows.append(
                 {
                     "n_components": int(k),
                     "metric": metric,
                     "n_subjects": len(x),
-                    "mean": float(np.mean(x)),
+                    "mean": mean,
                     "sd": float(np.std(x, ddof=1)),
-                    "ci_low": float(np.mean(x) - 1.96 * np.std(x, ddof=1) / np.sqrt(len(x))),
-                    "ci_high": float(np.mean(x) + 1.96 * np.std(x, ddof=1) / np.sqrt(len(x))),
+                    "ci_low": ci_low,
+                    "ci_high": ci_high,
                     "t_vs_chance": float(stats.ttest_1samp(x, 0.5).statistic),
                     "p_vs_chance": float(stats.ttest_1samp(x, 0.5).pvalue),
                 }
