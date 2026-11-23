@@ -100,13 +100,16 @@ for outcome, column in OUTCOMES.items():
 
     # observed: R^2 and r for every predictor
     rows = []
+    predictions = pd.DataFrame({"observed": y}, index=data.index)
     for p in predictors:
         x = data[p].to_numpy(float)
         pred = loo_predict(x, y)
         assert np.allclose(pred, loo_predict_fast(x, y[None, :])[0])   # fast version = sklearn
         rows.append({"predictor": p, "cv_r2": r2_score(y, pred),
                      "pearson_r": stats.pearsonr(y, pred)[0]})
+        predictions[p] = pred
     summary = pd.DataFrame(rows)
+    predictions.to_csv(RESULTS / f"aoa_predictions_{outcome}.csv", index_label="subject")   # for Fig. 2D inset
 
     # max-statistic permutation test
     rng = np.random.default_rng(42)

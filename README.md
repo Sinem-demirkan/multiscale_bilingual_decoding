@@ -72,6 +72,27 @@ For script 02c, first run script 01 again with `N_PARCELS = 100, 200, ..., 1000`
 Scripts 05 and 05b have two settings at their top: `TARGET = "language"` or `"switch"`
 (switch-status decoding, SI Fig. S7) and `YEO = 7` or `17` (SI Fig. S6).
 
+## Figures
+
+`figures/` has one script per main figure. Each reads the results saved by the
+analysis scripts and writes a PDF and PNG to `figures/output/`.
+
+| Figure | Script | Needs results from |
+|--------|--------|--------------------|
+| Fig. 1 | `figures/fig1.py` | scripts 02, 02b, 05, 06 |
+| Fig. 2 | `figures/fig2.py` | scripts 04, 07, 09, 10 |
+| Fig. 3 | `figures/fig3.py` | scripts 04, 08 |
+
+```bash
+python figures/fig1.py
+python figures/fig2.py
+python figures/fig3.py
+```
+
+The schematics (Fig. 1A, Fig. 2A) are drawings, not results: put them in
+`figures/assets/fig1A.png` and `figures/assets/fig2A.png` and the scripts place
+them in the figure. `figures/style.py` holds the shared colours and fonts.
+
 `src/` and `analysis_code/` refer to previous version of the code, only kept for reference.
 
 ## Citation
