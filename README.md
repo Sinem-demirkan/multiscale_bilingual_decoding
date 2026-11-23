@@ -85,3 +85,13 @@ Demirkan, S., Wassermann, D., & Sagot, B. (2026). *How the brain distinguishes a
 **Original dataset:**
 
 Guo, T., Liu, X., Chen, M., Fu, Y., & Guo, T. (2025). An fMRI dataset for investigating language control and cognitive control in bilinguals. *Scientific Data, 12*, Article 889. https://doi.org/10.1038/s41597-025-05245-9
+
+**Software and atlases used in this code:**
+
+- **Nilearn** (feature extraction, atlases, brain maps): Nilearn contributors. (2026). *Nilearn* (Version 0.13.1). Zenodo. https://doi.org/10.5281/zenodo.8397156
+- **scikit-learn** (classifiers, PCA): Pedregosa, F., Varoquaux, G., Gramfort, A., Michel, V., Thirion, B., Grisel, O., Blondel, M., Prettenhofer, P., Weiss, R., Dubourg, V., Vanderplas, J., Passos, A., Cournapeau, D., Brucher, M., Perrot, M., & Duchesnay, É. (2011). Scikit-learn: Machine learning in Python. *Journal of Machine Learning Research, 12*, 2825–2830.
+- **BrainSMASH** (spatial null, script 10): Burt, J. B., Helmer, M., Shinn, M., Anticevic, A., & Murray, J. D. (2020). Generative modeling of brain maps with spatial autocorrelation. *NeuroImage, 220*, Article 117038. https://doi.org/10.1016/j.neuroimage.2020.117038
+- **Schaefer parcellation**: Schaefer, A., Kong, R., Gordon, E. M., Laumann, T. O., Zuo, X.-N., Holmes, A. J., Eickhoff, S. B., & Yeo, B. T. T. (2018). Local-global parcellation of the human cerebral cortex from intrinsic functional connectivity MRI. *Cerebral Cortex, 28*, 3095–3114. https://doi.org/10.1093/cercor/bhx179
+- **Yeo networks**: Yeo, B. T. T., Krienen, F. M., Sepulcre, J., Sabuncu, M. R., Lashkari, D., Hollinshead, M., Roffman, J. L., Smoller, J. W., Zöllei, L., Polimeni, J. R., Fischl, B., Liu, H., & Buckner, R. L. (2011). The organization of the human cerebral cortex estimated by intrinsic functional connectivity. *Journal of Neurophysiology, 106*, 1125–1165. https://doi.org/10.1152/jn.00338.2011
+- **EvLab language atlas** (scripts 05, 05b, 10): Lipkin, B., Tuckute, G., Affourtit, J., Small, H., Mineroff, Z., Kean, H., Jouravlev, O., Rakocevic, L., Pritchett, B., Siegelman, M., Hoeflin, C., Pongos, A., Blank, I. A., Kline Struhl, M., Ivanova, A., Shannon, S., Sathe, A., Hoffmann, M., Nieto-Castañón, A., & Fedorenko, E. (2022). Probabilistic atlas for the language network based on precision fMRI data from >800 individuals. *Scientific Data, 9*, Article 529. https://doi.org/10.1038/s41597-022-01645-3
+- **EvLab multiple-demand atlas** (scripts 05, 05b, 10): Lipkin, B., Blank, I., & Fedorenko, E. (2023). Probabilistic atlases for the multiple demand (MD) and theory of mind (ToM) networks based on large-scale precision localizers. *Figshare*. https://doi.org/10.6084/m9.figshare.22306348
