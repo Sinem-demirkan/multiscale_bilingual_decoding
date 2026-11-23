@@ -103,7 +103,7 @@ Please cite the preprint and the original dataset as follows:
 
 Demirkan, S., Wassermann, D., & Sagot, B. (2026). *How the brain distinguishes a bilingual’s languages is partly shared across people and partly their own*. bioRxiv. https://doi.org/10.64898/2026.09.18.752561
 
-**Original dataset:**
+**Dataset:**
 
 Guo, T., Liu, X., Chen, M., Fu, Y., & Guo, T. (2025). An fMRI dataset for investigating language control and cognitive control in bilinguals. *Scientific Data, 12*, Article 889. https://doi.org/10.1038/s41597-025-05245-9
 
