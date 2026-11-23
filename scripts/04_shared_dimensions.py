@@ -1,4 +1,4 @@
-# Step 3: shared dimensions (Methods 2.8, Figs. 2B and 3A).
+# Step 4: shared dimensions (Methods 2.8, Figs. 2B and 3A).
 #
 # For every PAIR of participants:
 #   1. fit PCA on the pooled trials of the OTHER 75 participants (no language labels)
@@ -17,7 +17,7 @@
 # Within-person accuracies are later averaged over the 76 PCA spaces that exclude
 # that person.
 #
-# Usage:  python scripts/03_shared_dimensions.py   (after step 1; takes 1-2 hours)
+# Usage:  python scripts/04_shared_dimensions.py   (after step 1; takes 1-2 hours)
 
 from itertools import combinations
 from pathlib import Path
