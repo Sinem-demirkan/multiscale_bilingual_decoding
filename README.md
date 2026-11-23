@@ -14,6 +14,9 @@ pip install -r requirements.txt
 ```
 
 Set `DATA_ROOT` at the top of `scripts/01_extract_parcels.py` to your copy of the data.
+Example: DATA_ROOT = Path("/home/sdemirka/fmri/duo-cogcon")   # folder with the ds005455 single-trial files
+
+Script 01 saves `results/parcels_schaefer800.npz`, and all later scripts load that file, so they need no paths.
 
 ## Analyses
 
