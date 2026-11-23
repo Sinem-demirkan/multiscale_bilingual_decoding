@@ -1,9 +1,5 @@
 numpy
 pandas
-scipy
-scikit-learn
 nibabel
-nilearn
-matplotlib
-statsmodels
-brainsmash
+nilearn==0.13.1
+scikit-learn==1.8.0
