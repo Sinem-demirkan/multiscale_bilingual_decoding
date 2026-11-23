@@ -1,5 +1,7 @@
 numpy
 pandas
+scipy
+statsmodels
 nibabel
 nilearn==0.13.1
 scikit-learn==1.8.0
