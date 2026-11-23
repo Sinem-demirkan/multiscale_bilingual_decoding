@@ -6,7 +6,8 @@
 #   demeaned      voxels minus the parcel mean on each trial
 #   mean          the parcel mean only (one feature)
 #
-# Group level: one-sided t-test of the 77 accuracies against 50% for every parcel,
+# Group level: one-sided t-test of the 77 accuracies against 50% for every parcel
+#              (settings T_TEST_SIDE and Q_THRESHOLD below),
 #              Benjamini-Hochberg across the 800 parcels, q <= 0.001.
 # Participant level: one-sided binomial test on the held-out predictions,
 #              Benjamini-Hochberg across the 800 parcels within each participant, q < 0.05.
@@ -31,6 +32,11 @@ from statsmodels.stats.multitest import multipletests
 
 DATA_ROOT = Path("/home/sdemirka/fmri/duo-cogcon")   # same folder as in step 1
 RESULTS = Path(__file__).resolve().parents[1] / "results"
+
+# group-level test, as written in Methods 2.7 (the old code used a two-sided
+# t-test with q < 0.05; change these two lines to compare)
+T_TEST_SIDE = "greater"   # "greater" = one-sided, "two-sided"
+Q_THRESHOLD = 0.001
 
 TASK = "LanguageControl"
 TRIAL_COLUMN = "trial_type"
@@ -68,6 +74,7 @@ def load_subject_voxels(subject):
                                     force_resample=True, copy_header=True)
         vols = np.asarray(img.dataobj, dtype=np.float32)
         vols = vols.reshape(-1, vols.shape[-1])[cortex].T          # (n_trials, n_cortical_voxels)
+        vols = np.nan_to_num(vols)                                 # empty voxels at the brain edge -> 0
 
         trial_types = events[TRIAL_COLUMN].astype(str)
         keep = trial_types.str.startswith(("L1", "L2")).to_numpy()  # naming trials only
@@ -136,17 +143,17 @@ df.to_csv(RESULTS / "parcelwise_by_subject.csv", index=False)
 # group level: one-sided t-test against 50% for each parcel, BH across the 800 parcels
 group_rows = []
 for (rep, parcel), g in df.groupby(["representation", "parcel"]):
-    t, p = stats.ttest_1samp(g["accuracy"], 0.5, alternative="greater")
+    t, p = stats.ttest_1samp(g["accuracy"], 0.5, alternative=T_TEST_SIDE)
     group_rows.append({"representation": rep, "parcel": parcel,
                        "mean_accuracy": g["accuracy"].mean(), "t": t, "p": p})
 group = pd.DataFrame(group_rows)
 group["q"] = np.nan
 for rep, idx in group.groupby("representation").groups.items():
     group.loc[idx, "q"] = multipletests(group.loc[idx, "p"], method="fdr_bh")[1]
-group["significant"] = group["q"] <= 0.001
+group["significant"] = (group["q"] <= Q_THRESHOLD) & (group["t"] > 0)
 group.to_csv(RESULTS / "parcelwise_group.csv", index=False)
 
-print("\nparcels distinguishing Chinese from English (group level, q <= 0.001)")
+print(f"\nparcels distinguishing Chinese from English (group level, {T_TEST_SIDE} t-test, q <= {Q_THRESHOLD})")
 for rep in ["voxels", "demeaned", "mean"]:
     sig = group[(group["representation"] == rep) & group["significant"]]
     print(f"{rep:<10}{len(sig):4d} of 800   mean accuracy in these parcels = {100 * sig['mean_accuracy'].mean():.1f}%")
