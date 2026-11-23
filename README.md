@@ -25,10 +25,10 @@ Set `DATA_ROOT` at the top of `scripts/01_extract_parcels.py` to your copy of th
 | 4 | `scripts/04_shared_dimensions.py` | Methods 2.8, Figs. 2B, 3A: leave-pair-out PCA; transfer and within-person decoding in shared and residual dimensions |
 
 ```bash
-python scripts/01_extract_parcels.py      # slow, run once -> results/parcels_schaefer800.npz
-python scripts/02_whole_cortex_decoding.py  # -> results/whole_cortex_decoding.csv
-python scripts/03_cross_participant_transfer.py  # -> results/cross_participant_transfer_*.csv
-python scripts/04_shared_dimensions.py      # 1-2 hours -> results/shared_dimensions_*.csv
+python scripts/01_extract_parcels.py    # run once and use for later, 800 parcel mean full representation -> results/parcels_schaefer800.npz
+python scripts/02_whole_cortex_decoding.py  # within-participant language decoding using the full rep. -> results/whole_cortex_decoding.csv
+python scripts/03_cross_participant_transfer.py  # cross-participant language decoding using the full rep. -> results/cross_participant_transfer_*.csv
+python scripts/04_shared_dimensions.py      # cross and within-participant decoding using k dimensions and/or residual signal -> results/shared_dimensions_*.csv
 ```
 
 `src/` and `analysis_code/` refer to previous version of the code, only kept for reference.
