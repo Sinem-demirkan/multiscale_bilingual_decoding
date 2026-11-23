@@ -89,11 +89,11 @@ python figures/fig2.py
 python figures/fig3.py
 ```
 
-The schematics (Fig. 1A, Fig. 2A) are drawings, not results: put them in
-`figures/assets/fig1A.png` and `figures/assets/fig2A.png` and the scripts place
-them in the figure. `figures/style.py` holds the shared colours and fonts.
+The schematics (Fig. 1A, Fig. 2A) are drawings. 
+They should be here --> `figures/assets/fig1A.png` and `figures/assets/fig2A.png` and the scripts place
+them in the figure. 
+`figures/style.py` sets the shared colours and fonts.
 
-`src/` and `analysis_code/` refer to previous version of the code, only kept for reference.
 
 ## Citation
 
