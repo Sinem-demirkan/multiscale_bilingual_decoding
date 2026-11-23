@@ -6,6 +6,10 @@
 #   run        (n_trials,)      run number of each trial (for leave-one-run-out)
 #   trial_type (n_trials,)      L1S, L1NS, L2S or L2NS
 #
+# N_PARCELS = 800 is the main analysis. For the granularity check (script 02c,
+# SI Fig. S2), change it to 100, 200, ..., 1000 and run again: each run saves
+# its own file, results/parcels_schaefer<N>.npz.
+#
 # Usage:  python scripts/01_extract_parcels.py
 
 from pathlib import Path
@@ -18,11 +22,11 @@ from nilearn.datasets import fetch_atlas_schaefer_2018
 from nilearn.maskers import NiftiLabelsMasker
 
 DATA_ROOT = Path("/home/sdemirka/fmri/duo-cogcon")   # folder with the ds005455 single-trial files
-OUT_FILE = Path(__file__).resolve().parents[1] / "results" / "parcels_schaefer800.npz"
+N_PARCELS = 800   # 800 for all main analyses; 100-1000 for the granularity check
 
 TASK = "LanguageControl"
 TRIAL_COLUMN = "trial_type"
-N_PARCELS = 800
+OUT_FILE = Path(__file__).resolve().parents[1] / "results" / f"parcels_schaefer{N_PARCELS}.npz"
 
 
 # filename parser: ".../sub-001_task-LanguageControl_run-03_events.tsv" -> 3
@@ -31,7 +35,7 @@ def parse_run_number(path):
     return int(after_run.split("_")[0])      # 3
 
 
-# atlas + masker: average the voxels inside each of the 800 parcels
+# atlas + masker: average the voxels inside each parcel
 atlas = fetch_atlas_schaefer_2018(n_rois=N_PARCELS, yeo_networks=7, resolution_mm=2)
 masker = NiftiLabelsMasker(
     labels_img=atlas.maps,
@@ -71,7 +75,7 @@ def load_subject_data(subject):
         return None
 
     # 4. brain images -> parcel means
-    X = masker.fit_transform(image.concat_imgs(trial_imgs))   # (n_trials, 800)
+    X = masker.fit_transform(image.concat_imgs(trial_imgs))   # (n_trials, N_PARCELS)
     return X, np.array(run_of_trial), np.array(trial_types)
 
 
