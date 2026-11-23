@@ -17,6 +17,9 @@
 # Within-person accuracies are later averaged over the 76 PCA spaces that exclude
 # that person.
 #
+# The 2,926 PCA spaces are also saved (results/shared_dimensions_components.npy,
+# about 2 GB, plus the list of pairs) so that scripts 07 and 08 can reuse them.
+#
 # Usage:  python scripts/04_shared_dimensions.py   (after step 1; takes 1-2 hours)
 
 from itertools import combinations
@@ -70,12 +73,20 @@ transfer_rows = []
 within_rows = []
 pairs = list(combinations(subjects, 2))   # 77 * 76 / 2 = 2,926 pairs
 
+# save every PCA space: components[i] = the 200 shared dimensions fitted without pair i
+pd.DataFrame(pairs, columns=["subject_a", "subject_b"]).to_csv(
+    RESULTS / "shared_dimensions_pairs.csv", index_label="pair")
+saved_components = np.lib.format.open_memmap(
+    RESULTS / "shared_dimensions_components.npy", mode="w+", dtype=np.float32,
+    shape=(len(pairs), max(K_LIST), subject_X[subjects[0]].shape[1]))
+
 for i, (a, b) in enumerate(pairs, start=1):
     # 1. PCA on everyone except a and b
     pool = np.vstack([subject_X[s] for s in subjects if s not in (a, b)])
     pca = PCA(n_components=max(K_LIST), svd_solver="randomized", random_state=42)
     pca.fit(pool)
     all_components = pca.components_   # (200, 800), one row per shared dimension
+    saved_components[i - 1] = all_components
 
     # 2. between people, both directions
     for teacher, learner in [(a, b), (b, a)]:
@@ -100,6 +111,7 @@ for i, (a, b) in enumerate(pairs, start=1):
 
     print(f"pair {i}/{len(pairs)}: {a} {b}", flush=True)
 
+saved_components.flush()
 transfer = pd.DataFrame(transfer_rows)
 within = pd.DataFrame(within_rows)
 transfer.to_csv(RESULTS / "shared_dimensions_transfer_by_pair.csv", index=False)

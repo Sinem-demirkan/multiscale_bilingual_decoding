@@ -5,7 +5,7 @@ across people and partly their own** (Demirkan, Wassermann & Sagot).
 
 Data: Guo et al. (2025), OpenNeuro [ds005455](https://openneuro.org/datasets/ds005455)
 v1.1.5, using the single-trial (LSS) activation images released with the
-dataset. The data are not included here.
+dataset. 
 
 ## Setup
 
@@ -14,24 +14,25 @@ pip install -r requirements.txt
 ```
 
 Two scripts read the raw data: `scripts/01_extract_parcels.py` and
-`scripts/06_parcelwise_multivoxel.py`. Open them and set `DATA_ROOT` to the
-folder where you downloaded the dataset, for example:
+`scripts/06_parcelwise_multivoxel.py`. Set `DATA_ROOT` at the top of both to your copy of the data, for example:
 
 ```python
 DATA_ROOT = Path("/home/sdemirka/fmri/duo-cogcon")   # folder with the ds005455 single-trial files
 ```
 
-Script 01 saves `results/parcels_schaefer800.npz`, and scripts 02-05 load that
-file, so they need no data path.
+Script 01 saves `results/parcels_schaefer800.npz`, and all other scripts except 06 load that file.
 
-Scripts 05 and 05b also need the probabilistic language and multiple-demand maps
-(Lipkin et al., 2022, 2023) from the EvLab resources; set `LIPKIN_LANGUAGE_MAP`
-and `LIPKIN_MD_MAP` at their top.
+Scripts 05, 05b and 10 also need the probabilistic language and multiple-demand maps
+(Lipkin et al., 2022, 2023) from the EvLab resources: set `LIPKIN_LANGUAGE_MAP`
+and `LIPKIN_MD_MAP` at their top. Script 09 reads `participants.tsv` from the
+dataset: set `PARTICIPANTS_FILE` at its top.
 
 ## Analyses
 
-Each script is short and runs top to bottom. Run step 1 first; the others can
-run in any order. A "b" script is a variant of the script with the same number.
+Run script 01 first. Scripts 07, 08 and 10 use the PCA spaces saved by script 04,
+and script 09 uses the results of scripts 02 and 04, so run those first; the others
+can run in any order. A "b" or "c" script is a
+variant of the script with the same number.
 
 | Step | Script | Paper |
 |------|--------|-------|
@@ -41,30 +42,46 @@ run in any order. A "b" script is a variant of the script with the same number.
 | 2c | `scripts/02c_robustness.py` | Methods 2.5, SI Fig. S2: same decoding with Schaefer 100-1000 parcels, and with PCA (90% variance) |
 | 3 | `scripts/03_cross_participant_transfer.py` | Methods 2.8, Fig. 2B: train on one participant, test on another (full 800 parcels) |
 | 4 | `scripts/04_shared_dimensions.py` | Methods 2.8, Figs. 2B, 3A: leave-pair-out PCA; transfer and within-person decoding in shared and residual dimensions |
-| 5 | `scripts/05_network_importance.py` | Methods 2.6, Fig. 1D, SI S6B, S7B: permutation importance on network PCA scores (Yeo networks; Lipkin language and MD sets) |
-| 5b | `scripts/05b_network_importance_size_matched.py` | Methods 2.6, SI S6A, S7A: same without PCA, networks size-matched to the smallest one |
+| 5 | `scripts/05_network_importance.py` | Methods 2.6, Fig. 1D, SI Figs. S6B, S7B: permutation importance on network PCA scores (Yeo networks; Lipkin language and MD sets) |
+| 5b | `scripts/05b_network_importance_size_matched.py` | Methods 2.6, SI Figs. S6A, S7A: same without PCA, networks size-matched to the smallest one |
 | 6 | `scripts/06_parcelwise_multivoxel.py` | Methods 2.7, Fig. 1C: decoding within each parcel from voxels, demeaned voxels, parcel mean |
-
-For script 2c, first run script 01 again with `N_PARCELS = 100, 200, ..., 1000`
-(set at its top); each run saves `results/parcels_schaefer<N>.npz`.
-
-Scripts 5 and 5b have two settings at the top: `TARGET = "language"` or `"switch"`
-(switch-status decoding, SI Fig. S7) and `YEO = 7` or `17` (SI Fig. S6).
+| 7 | `scripts/07_single_dimension_transfer.py` | Methods 2.8, Fig. 2C: transfer with each of the first 25 shared dimensions alone |
+| 8 | `scripts/08_signatures_identification.py` | Methods 2.8, Fig. 3B-C: English-minus-Chinese signatures, similarity across runs and people, identification |
+| 9 | `scripts/09_aoa_prediction.py` | Methods 2.9, Fig. 2D, SI Tables S2-S3: predicting age of English acquisition (and age) from 43 predictors, max-statistic permutation test |
+| 10 | `scripts/10_pc_network_profiles.py` | Methods 2.8, Fig. 2E, SI Fig. S9: PCA on all participants, network enrichment of each dimension, BrainSMASH spatial null |
 
 ```bash
-python scripts/01_extract_parcels.py                    # slow, run once -> results/parcels_schaefer800.npz
-python scripts/02_whole_cortex_decoding.py              # -> results/whole_cortex_decoding.csv
-python scripts/02b_switch_decoding.py                   # -> results/switch_decoding.csv
-python scripts/02c_robustness.py                        # -> results/robustness_*.csv
-python scripts/03_cross_participant_transfer.py         # -> results/cross_participant_transfer_*.csv
-python scripts/04_shared_dimensions.py                  # 1-2 hours -> results/shared_dimensions_*.csv
-python scripts/05_network_importance.py                 # -> results/network_importance_*.csv
-python scripts/05b_network_importance_size_matched.py   # ~30 min -> results/network_importance_size_matched_*.csv
-python scripts/06_parcelwise_multivoxel.py              # 1-2 hours, reads raw images -> results/parcelwise_*.csv
+python scripts/01_extract_parcels.py    # run once and use for later, 800 parcel mean full representation -> results/parcels_schaefer800.npz
+python scripts/02_whole_cortex_decoding.py  # within-participant language decoding using the full rep. -> results/whole_cortex_decoding.csv
+python scripts/02b_switch_decoding.py   # within-participant decoding on repeat / switch trials, and of switch status -> results/switch_decoding.csv
+python scripts/02c_robustness.py        # within-participant decoding with other parcellations and with PCA -> results/robustness_*.csv
+python scripts/03_cross_participant_transfer.py  # cross-participant language decoding using the full rep. -> results/cross_participant_transfer_*.csv
+python scripts/04_shared_dimensions.py      # cross and within-participant decoding using k dimensions and/or residual signal -> results/shared_dimensions_*.csv
+python scripts/05_network_importance.py     # network importance on PCA scores -> results/network_importance_*.csv
+python scripts/05b_network_importance_size_matched.py  # network importance without PCA, size-matched -> results/network_importance_size_matched_*.csv
+python scripts/06_parcelwise_multivoxel.py  # decoding within each parcel, reads the raw images -> results/parcelwise_*.csv
+python scripts/07_single_dimension_transfer.py  # cross-participant decoding with one shared dimension at a time -> results/single_dimension_transfer_*.csv
+python scripts/08_signatures_identification.py  # person-specific signatures and identification -> results/signature*.npz/csv
+python scripts/09_aoa_prediction.py         # age of English acquisition from transfer and decoding -> results/aoa_*.csv
+python scripts/10_pc_network_profiles.py    # loading maps and network profiles of the shared dimensions -> results/pc_*.csv
 ```
 
-`src/` and `analysis_code/` hold the previous version of the code, kept for reference.
+For script 02c, first run script 01 again with `N_PARCELS = 100, 200, ..., 1000`
+(set at its top); each run saves `results/parcels_schaefer<N>.npz`.
+
+Scripts 05 and 05b have two settings at their top: `TARGET = "language"` or `"switch"`
+(switch-status decoding, SI Fig. S7) and `YEO = 7` or `17` (SI Fig. S6).
+
+`src/` and `analysis_code/` refer to previous version of the code, only kept for reference.
 
 ## Citation
 
-If you use this code, please cite the preprint and the dataset (Guo et al., 2025).
+Please cite the preprint and the original dataset as follows:
+
+**Preprint:**
+
+Demirkan, S., Wassermann, D., & Sagot, B. (2026). *How the brain distinguishes a bilingual’s languages is partly shared across people and partly their own*. bioRxiv. https://doi.org/10.64898/2026.09.18.752561
+
+**Original dataset:**
+
+Guo, T., Liu, X., Chen, M., Fu, Y., & Guo, T. (2025). An fMRI dataset for investigating language control and cognitive control in bilinguals. *Scientific Data, 12*, Article 889. https://doi.org/10.1038/s41597-025-05245-9
